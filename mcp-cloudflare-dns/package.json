@@ -1,0 +1,17 @@
+{
+  "name": "mcp-cloudflare-dns",
+  "version": "1.0.0",
+  "description": "MCP server for Cloudflare DNS management",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "mcp-cloudflare-dns": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "dotenv": "^17.2.3"
+  }
+}

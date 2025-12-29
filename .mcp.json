@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "cloudflare": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cloudflare/mcp-server-cloudflare",
+        "run",
+        "${CLOUDFLARE_ACCOUNT_ID}"
+      ],
+      "env": {
+        "CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}"
+      }
+    },
+    "cloudflare-dns": {
+      "command": "/opt/zenaflow/mcp-cloudflare-dns/start.sh",
+      "args": []
+    },
+    "postgres": {
+      "command": "/opt/zenaflow/mcp-postgres/start.sh",
+      "args": []
+    }
+  }
+}
