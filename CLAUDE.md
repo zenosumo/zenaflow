@@ -82,12 +82,8 @@ All services run in a Docker Compose stack connected via `core_net` network:
 
 2. **postgres** (PostgreSQL 16)
    - Hosts two databases: `n8n` (system) and `zenaflow` (application)
-   - `n8n` database: Workflow definitions, credentials, execution history
-   - `zenaflow` database: Multi-app platform with users, applications, and chat messages
    - Two roles: `n8n` (superuser) and `zenaflow_user` (restricted app access)
-   - Health checks configured, data in `./postgres_data`
-   - See `doc/postgres_pgadmin_setup.md` for complete database configuration
-   - See `doc/schema.sql` for application database schema
+   - Data in `./postgres_data`
 
 3. **redis** (Redis 7)
    - AOF persistence enabled for durability
@@ -128,29 +124,6 @@ Custom Claude Code session wrapper that:
 
 Environment loading (scripts/env.sh) sets up fnm (Fast Node Manager) path.
 
-## Application Database Architecture
-
-The `zenaflow` PostgreSQL database powers a multi-app Telegram bot platform with centralized user management:
-
-**Core Tables**:
-- `users` - User accounts with telegram_id, phone_number, display_name, and admin status
-- `applications` - Available apps (e.g., deanna, b4, anaketa) with bot usernames
-- `user_applications` - Junction table linking users to their accessible apps
-- `chat_messages` - Request/response pairs with status tracking (pending/completed/failed)
-
-**Key Design Patterns**:
-- Messages belong to user-application pairings (via `user_app_id`), not users or apps independently
-- Telegram message IDs used for deduplication (prevents duplicate webhook processing)
-- Status lifecycle: `pending` → `completed`/`failed` with automatic timestamp tracking
-- Role-based access: `zenaflow_user` cannot access `n8n` database
-
-**Common Workflows**:
-- Admins use Vader bot to pre-register users and assign app access
-- Users interact with app-specific bots (Deanna, B4, etc.)
-- Each message creates a row (status='pending'), later updated with response
-
-Full schema with constraints, indexes, and example queries in `doc/schema.sql`.
-
 ## Common Commands
 
 ### Docker Stack Management (VPS Production Only)
@@ -178,29 +151,24 @@ docker compose ps
 
 **VPS Production (Docker)**:
 ```bash
-# PostgreSQL - n8n database
+# PostgreSQL - n8n database (system operations)
 docker exec -it postgres psql -U n8n -d n8n
-
-# PostgreSQL - zenaflow database
-docker exec -it postgres psql -U zenaflow_user -d zenaflow
 
 # Redis CLI
 docker exec -it redis redis-cli
 ```
 
-**Local Development (via SSH Tunnel)**:
+**Management Tools**:
+- **pgAdmin** (VPS: 127.0.0.1:8889, Local: SSH tunnel on port 8889)
+- **RedisInsight** (VPS: 127.0.0.1:5540, Local: SSH tunnel on port 5555)
+
+**Local Development (SSH Tunnels)**:
 ```bash
-# Tunnel for pgAdmin web UI
+# pgAdmin web UI
 ssh -L 8889:localhost:8889 root@core.zenaflow.com
-# Then open: http://localhost:8889
 
-# Tunnel for RedisInsight web UI
+# RedisInsight web UI
 ssh -L 5555:localhost:5540 root@core.zenaflow.com
-# Then open: http://localhost:5555
-
-# Tunnel for direct PostgreSQL access (psql, IDEs, Prisma Studio)
-ssh -L 5432:localhost:5432 root@core.zenaflow.com
-# Connection string: postgresql://zenaflow_user:${POSTGRES_PASSWORD}@localhost:5432/zenaflow
 ```
 
 ### Caddy Management
@@ -270,43 +238,6 @@ micro /etc/caddy/Caddyfile
 micro /opt/core/docker-compose.yml
 ```
 
-## MCP Servers
-
-Zenaflow integrates with Claude Code via Model Context Protocol (MCP) servers configured in `.mcp.json`:
-
-**Active MCP Servers**:
-1. **postgres** - MCP Toolbox for Databases (Google)
-   - Script: `mcp-toolbox/start.sh`
-   - 28 prebuilt PostgreSQL tools including execute_sql, list_tables, database_overview
-   - Read-only access to `zenaflow` database via `zenaflow_user` role
-   - Token-efficient: loads only essential tools vs all 28 (579 tokens vs 19K)
-   - Version: 0.24.0 (actively maintained)
-
-2. **cloudflare** - Official Cloudflare MCP server
-   - Manages Cloudflare Workers, KV, R2, D1, DNS, and more
-   - Requires: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
-
-3. **cloudflare-dns** - Cloudflare DNS management
-   - Script: `mcp-cloudflare-dns/start.sh`
-
-**MCP Toolbox Configuration**:
-- Environment: Loads from `/opt/zenaflow/.env` (sets `POSTGRES_*` vars)
-- Tools file: `mcp-toolbox/tools.yaml` (custom tool configuration)
-- Connection: `postgresql://zenaflow_user:***@localhost:5432/zenaflow`
-
-## Environment Configuration
-
-Required environment variables (typically in `.env` file, gitignored):
-- `POSTGRES_PASSWORD` - Password for zenaflow_user database role
-- `CLOUDFLARE_API_TOKEN` - Cloudflare API token for MCP servers
-- `CLOUDFLARE_ACCOUNT_ID` - Cloudflare account ID for MCP servers
-
-The n8n service environment is extensively configured in docker-compose.yml including:
-- Multi-domain setup (workflow/webhook)
-- Security hardening (block env access, enforce file permissions)
-- PostgreSQL connection details
-- Timezone and protocol settings
-
 ## Data Persistence
 
 All data is persisted in subdirectories under `docker/`:
@@ -318,27 +249,6 @@ All data is persisted in subdirectories under `docker/`:
 - `pgadmin_config/servers.json` - Pre-configured database connections
 
 These directories are gitignored and should be backed up separately.
-
-## Security Considerations
-
-**Application-level**:
-- n8n runners enabled for isolated workflow execution
-- Environment variable access blocked in nodes (`N8N_BLOCK_ENV_ACCESS_IN_NODE`)
-- Git bare repos disabled for security
-- File permissions enforcement enabled
-- All services bound to localhost except via Caddy
-- Cloudflare proxy IP ranges trusted for real IP detection
-
-**VPS-level** (see `doc/vps_architecture.md`):
-- SSH key-only authentication (PasswordAuthentication disabled)
-- UFW firewall: deny all incoming except 22, 80, 443
-- Fail2Ban active jails: sshd, caddy-login, caddy-webhook, recidive
-- Database access only via SSH tunnels or internal Docker network
-- Dedicated `zenaflow_user` role cannot access n8n system database
-
-**Recovery**:
-- Hetzner console access available if SSH/firewall breaks
-- Database backups via pg_dump to `/tmp`
 
 ## Documentation References
 
