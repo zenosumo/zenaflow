@@ -17,7 +17,7 @@
       "args": []
     },
     "postgres": {
-      "command": "/opt/zenaflow/mcp-toolbox/start.sh"
+      "command": "/opt/zenaflow/.claude/skills/zenaflow-db/mcp-toolbox/start.sh"
     }
   }
 }

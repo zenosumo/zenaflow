@@ -169,7 +169,7 @@ See [reference.md](reference.md) for detailed query examples.
 
 ## MCP Tools Available
 
-From the postgres MCP server (`/opt/zenaflow/mcp-toolbox/start.sh`):
+From the postgres MCP server (`mcp-toolbox/start.sh`):
 
 **Schema Discovery**:
 - `list_tables` - List all tables and their structure
