@@ -18,6 +18,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Service management (systemctl, service commands)
   - Package management (apt, dpkg, npm -g with sudo)
 
+## Environment Detection
+
+**Automatic Detection via SessionStart Hook:**
+A Claude Code hook (`.claude/hooks/session_start.py`) runs automatically at session start to detect the environment based on working directory path. The following environment variables are available in all bash commands:
+
+- `$ZENAFLOW_ENV` - Environment type: `VPS_PRODUCTION` or `LOCAL_DEVELOPMENT`
+- `$ZENAFLOW_CWD` - Current working directory at session start
+- `$ZENAFLOW_PLATFORM` - Platform: `linux`, `darwin`, etc.
+
+**Environment Types:**
+
+**VPS Production** (`ZENAFLOW_ENV=VPS_PRODUCTION`):
+- Detected when working directory is `/opt/core/*` or `/opt/zenaflow/*`
+- Full system access: UFW, Fail2Ban, systemctl available
+- Production domains: workflow.zenaflow.com, webhook.zenaflow.com
+- Direct access to all Docker services and docker compose commands
+- Requires sudo permission for system operations (see Operational Rules)
+
+**Local Development** (`ZENAFLOW_ENV=LOCAL_DEVELOPMENT`):
+- Detected when working directory is NOT `/opt/core/*` or `/opt/zenaflow/*`
+- Works on any platform (macOS, Linux, Windows, etc.)
+- **NO Docker access** - Docker and docker compose commands are VPS-only
+- No system-level tools (UFW, Fail2Ban, systemctl)
+- No production domains
+- Database access requires SSH tunnels to VPS:
+  ```bash
+  ssh -L 5432:localhost:5432 root@core.zenaflow.com  # PostgreSQL
+  ssh -L 8889:localhost:8889 root@core.zenaflow.com  # pgAdmin
+  ssh -L 5555:localhost:5540 root@core.zenaflow.com  # RedisInsight
+  ```
+
+**Claude Code Behavior:**
+- Check `$ZENAFLOW_ENV` before suggesting system commands
+- **NEVER run docker or docker compose commands when `ZENAFLOW_ENV=LOCAL_DEVELOPMENT`**
+- Never suggest `ufw`, `fail2ban-client`, or `systemctl` when `ZENAFLOW_ENV=LOCAL_DEVELOPMENT`
+- Recommend SSH tunnels for database access on local development
+- Remind about sudo permission requirement when `ZENAFLOW_ENV=VPS_PRODUCTION`
+
 ## Project Overview
 
 Zenaflow is a VPS-based n8n workflow automation infrastructure that provides a production-ready deployment with:
@@ -115,7 +153,10 @@ Full schema with constraints, indexes, and example queries in `doc/schema.sql`.
 
 ## Common Commands
 
-### Docker Stack Management
+### Docker Stack Management (VPS Production Only)
+
+**IMPORTANT: Docker commands are only available in VPS Production environment (`ZENAFLOW_ENV=VPS_PRODUCTION`). Do not run these in local development.**
+
 ```bash
 # Start all services
 cd docker && docker compose up -d
@@ -135,7 +176,7 @@ docker compose ps
 
 ### Database Access
 
-**Local (Docker)**:
+**VPS Production (Docker)**:
 ```bash
 # PostgreSQL - n8n database
 docker exec -it postgres psql -U n8n -d n8n
@@ -147,7 +188,7 @@ docker exec -it postgres psql -U zenaflow_user -d zenaflow
 docker exec -it redis redis-cli
 ```
 
-**Remote (via SSH Tunnel)**:
+**Local Development (via SSH Tunnel)**:
 ```bash
 # Tunnel for pgAdmin web UI
 ssh -L 8889:localhost:8889 root@core.zenaflow.com
