@@ -1,0 +1,24 @@
+# MCP Toolbox Configuration for Zenaflow PostgreSQL Database
+# Uses environment variables for secure credential management
+
+sources:
+  zenaflow-db:
+    kind: postgres
+    host: ${POSTGRES_HOST}
+    port: ${POSTGRES_PORT}
+    database: ${POSTGRES_DATABASE}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+
+# Use prebuilt PostgreSQL tools for token efficiency
+# Available tools: postgres-execute-sql, postgres-list-tables, postgres-list-schemas,
+# postgres-list-views, postgres-list-active-queries, postgres-list-available-extensions,
+# postgres-list-installed-extensions, and more
+
+toolsets:
+  zenaflow-postgres:
+    # Cherry-pick essential tools (579 tokens instead of 19K for all 28 tools)
+    - postgres-execute-sql      # Run parameterized SQL queries
+    - postgres-list-tables       # List all tables with descriptions
+    - postgres-list-schemas      # List database schemas
+    - postgres-describe-table    # Get table structure and constraints

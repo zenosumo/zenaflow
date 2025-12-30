@@ -31,7 +31,6 @@ postgres:
   environment:
     - POSTGRES_DB=n8n
     - POSTGRES_USER=n8n
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
   volumes:
     - ./postgres_data:/var/lib/postgresql/data
   networks:
@@ -77,7 +76,7 @@ CREATE DATABASE zenaflow OWNER n8n;
 A dedicated restricted user was created for application-level queries:
 
 ```sql
-CREATE ROLE zenaflow_user LOGIN PASSWORD '${ZENAFLOW_DB_PASSWORD}';
+CREATE ROLE zenaflow_user LOGIN PASSWORD '${POSTGRES_PASSWORD}';
 ```
 
 ### Granted privileges
@@ -116,7 +115,7 @@ pgadmin:
     - "127.0.0.1:8889:80"
   environment:
     PGADMIN_DEFAULT_EMAIL: "kris@zenaflow.com"
-    PGADMIN_DEFAULT_PASSWORD: ${POSTGRES_PASSWORD}
+    PGADMIN_DEFAULT_PASSWORD: xxx
     PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "False"
     PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
   volumes:
@@ -129,7 +128,7 @@ pgadmin:
 | Field | Value |
 |-------|--------|
 | Email | `kris@zenaflow.com` |
-| Password | `${POSTGRES_PASSWORD}` |
+| Password | `xxx` |
 
 ### Local port binding
 `127.0.0.1:8889 → pgAdmin`
@@ -164,7 +163,7 @@ Then connect locally with:
 - Port: `5432`
 - Database: `zenaflow`
 - User: `zenaflow_user`
-- Password: `${ZENAFLOW_DB_PASSWORD}`
+- Password: `${POSTGRES_PASSWORD}`
 
 ---
 
@@ -198,7 +197,7 @@ You may manually add the Zenaflow DB in pgAdmin:
 
 - Database: `zenaflow`
 - User: `zenaflow_user`
-- Password: `${ZENAFLOW_DB_PASSWORD}`
+- Password: `${POSTGRES_PASSWORD}`
 
 ---
 
@@ -214,7 +213,7 @@ postgres:5432
 Connection string example:
 
 ```
-postgresql://zenaflow_user:${ZENAFLOW_DB_PASSWORD}@postgres:5432/zenaflow
+postgresql://zenaflow_user:${POSTGRES_PASSWORD}@postgres:5432/zenaflow
 ```
 
 ### Outside Docker (via SSH tunnel)
@@ -279,9 +278,9 @@ http://localhost:8889
 
 | Description | User | Password |
 |------------|-------|----------|
-| Postgres superuser | `n8n` | `${POSTGRES_PASSWORD}` |
-| Zenaflow app user | `zenaflow_user` | `${ZENAFLOW_DB_PASSWORD}` |
-| pgAdmin login | `kris@zenaflow.com` | `${POSTGRES_PASSWORD}` |
+| Postgres superuser | `n8n` | `xxx` |
+| Zenaflow app user | `zenaflow_user` | `${POSTGRES_PASSWORD}` |
+| pgAdmin login | `kris@zenaflow.com` | `xxx` |
 
 ---
 

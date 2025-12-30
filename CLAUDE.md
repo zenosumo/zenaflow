@@ -200,13 +200,8 @@ ssh -L 5555:localhost:5540 root@core.zenaflow.com
 
 # Tunnel for direct PostgreSQL access (psql, IDEs, Prisma Studio)
 ssh -L 5432:localhost:5432 root@core.zenaflow.com
-# Connection string: postgresql://zenaflow_user:${ZENAFLOW_DB_PASSWORD}@localhost:5432/zenaflow
+# Connection string: postgresql://zenaflow_user:${POSTGRES_PASSWORD}@localhost:5432/zenaflow
 ```
-
-**Database Credentials**:
-- n8n superuser: `n8n` / `${POSTGRES_PASSWORD}`
-- Application user: `zenaflow_user` / `${ZENAFLOW_DB_PASSWORD}`
-- pgAdmin login: `kris@zenaflow.com` / `${POSTGRES_PASSWORD}`
 
 ### Caddy Management
 ```bash
@@ -275,13 +270,36 @@ micro /etc/caddy/Caddyfile
 micro /opt/core/docker-compose.yml
 ```
 
+## MCP Servers
+
+Zenaflow integrates with Claude Code via Model Context Protocol (MCP) servers configured in `.mcp.json`:
+
+**Active MCP Servers**:
+1. **postgres** - MCP Toolbox for Databases (Google)
+   - Script: `mcp-toolbox/start.sh`
+   - 28 prebuilt PostgreSQL tools including execute_sql, list_tables, database_overview
+   - Read-only access to `zenaflow` database via `zenaflow_user` role
+   - Token-efficient: loads only essential tools vs all 28 (579 tokens vs 19K)
+   - Version: 0.24.0 (actively maintained)
+
+2. **cloudflare** - Official Cloudflare MCP server
+   - Manages Cloudflare Workers, KV, R2, D1, DNS, and more
+   - Requires: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+
+3. **cloudflare-dns** - Cloudflare DNS management
+   - Script: `mcp-cloudflare-dns/start.sh`
+
+**MCP Toolbox Configuration**:
+- Environment: Loads from `/opt/zenaflow/.env` (sets `POSTGRES_*` vars)
+- Tools file: `mcp-toolbox/tools.yaml` (custom tool configuration)
+- Connection: `postgresql://zenaflow_user:***@localhost:5432/zenaflow`
+
 ## Environment Configuration
 
 Required environment variables (typically in `.env` file, gitignored):
-- `POSTGRES_PASSWORD` - PostgreSQL password for n8n user
-- `ZENAFLOW_DB_PASSWORD` - Password for zenaflow_user database role (default: `${ZENAFLOW_DB_PASSWORD}`)
-- `CLOUDFLARE_API_TOKEN` - Cloudflare API token for MCP server (if using Cloudflare MCP)
-- `CLOUDFLARE_ACCOUNT_ID` - Cloudflare account ID for MCP server (if using Cloudflare MCP)
+- `POSTGRES_PASSWORD` - Password for zenaflow_user database role
+- `CLOUDFLARE_API_TOKEN` - Cloudflare API token for MCP servers
+- `CLOUDFLARE_ACCOUNT_ID` - Cloudflare account ID for MCP servers
 
 The n8n service environment is extensively configured in docker-compose.yml including:
 - Multi-domain setup (workflow/webhook)
