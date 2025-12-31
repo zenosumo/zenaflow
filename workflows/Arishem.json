@@ -1,0 +1,318 @@
+{
+  "name": "Arishem",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        -48
+      ],
+      "id": "40f11405-9b2a-40f0-80ba-609d8c14e9e1",
+      "name": "Telegram Trigger",
+      "webhookId": "5fc984e6-f79b-4b5a-a2dc-dadc828858e5",
+      "credentials": {
+        "telegramApi": {
+          "id": "sdJCfNBtnfNhKCiG",
+          "name": "Arisem Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.response }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        -48
+      ],
+      "id": "13d0d102-0f1e-43c6-b49c-d520802a4c17",
+      "name": "Send a text message",
+      "webhookId": "5b560df1-82b2-45b3-ab82-f3779a28074b",
+      "retryOnFail": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "sdJCfNBtnfNhKCiG",
+          "name": "Arisem Bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "=/opt/zenaflow/scripts/session.sh \"{{ $json.prompt }}\" ",
+        "cwd": "/opt/zenaflow"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        224,
+        -144
+      ],
+      "id": "1447bcb8-656f-418a-9f24-8e07bc43c19a",
+      "name": "Run Claude",
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "AaHFl97grKCeKJk5",
+          "name": "SSH core-hub-01"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "473c99ab-05da-42de-95e9-7e04c36cba46",
+              "name": "response",
+              "value": "={{ $json.stdout }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        -144
+      ],
+      "id": "5e4d652b-af79-4e29-9e25-2c35a40498a3",
+      "name": "Prepare Response"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "31f797df-383b-4a65-bbc0-443b2b31dc4d",
+              "name": "prompt",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        -144
+      ],
+      "id": "70d22cc4-6c68-4f4e-b704-1bf6668fbc81",
+      "name": "Prepare Prompt"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "10bb581a-fc07-4a70-a200-2d604a52e571",
+              "leftValue": "={{ $json.message.from.username }}",
+              "rightValue": "pocmior",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "3803555b-b559-4579-93a1-19973c4a844d",
+              "leftValue": "={{ $json.message.from.username }}",
+              "rightValue": "zenominus",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        -48
+      ],
+      "id": "8379bed4-c025-468c-b1bb-a97097d10d6f",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $input.first().json.response.replace(/&/g, \"&amp;\").replace(/>/g, \"&gt;\").replace(/</g, \"&lt;\").replace(/\"/g, \"&quot;\") }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "9f114c84-a764-49db-a0ac-50a3302c2880",
+      "name": "Retry Send",
+      "type": "n8n-nodes-base.telegram",
+      "position": [
+        864,
+        -48
+      ],
+      "typeVersion": 1.1,
+      "webhookId": "4089c5af-8545-4d9d-9732-c402996982d2",
+      "credentials": {
+        "telegramApi": {
+          "id": "Pbmw5kgxJAVkkG0M",
+          "name": "Vader Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c03648cd-8970-45de-9510-099ec9bc9442",
+              "name": "response",
+              "value": "Not authorized!",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        48
+      ],
+      "id": "b19997da-d378-4f76-8005-32163e1a4a9c",
+      "name": "Unauthorized"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Claude": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Prompt": {
+      "main": [
+        [
+          {
+            "node": "Run Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Prepare Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Retry Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unauthorized": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "bfac0810-bb8b-4433-9948-9fb50b6c4e2a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "37b46ef5c2db25865f2ba71a01e9e41b440d7580d0b19503683e681cd593e5db"
+  },
+  "id": "dK4hbTnrSI13Xydh",
+  "tags": [
+    {
+      "updatedAt": "2025-12-11T20:54:46.248Z",
+      "createdAt": "2025-12-11T20:54:46.248Z",
+      "id": "wPcpmia0GLe04S2m",
+      "name": "Omni"
+    }
+  ]
+}
