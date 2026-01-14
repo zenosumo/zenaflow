@@ -1,6 +1,6 @@
 services:
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:stable
     container_name: n8n
     restart: unless-stopped
     ports:
@@ -47,7 +47,7 @@ services:
       - core_net
 
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:v1.16.1
     container_name: qdrant
     restart: unless-stopped
     volumes:

@@ -18,6 +18,16 @@
     },
     "postgres": {
       "command": "/opt/zenaflow/.claude/skills/zenaflow-db/mcp-toolbox/start.sh"
+    },
+    "n8n-mcp": {
+      "command": "/opt/zenaflow/mcp-n8n/start.sh",
+      "env": {
+        "MCP_MODE": "stdio",
+        "N8N_API_URL": "http://127.0.0.1:5678",
+        "N8N_API_KEY": "${N8N_API_KEY}",
+        "LOG_LEVEL": "error",
+        "DISABLE_CONSOLE_OUTPUT": "true"
+      }
     }
   }
 }
