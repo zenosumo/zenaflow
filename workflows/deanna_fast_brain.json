@@ -1,0 +1,562 @@
+{
+  "name": "Deanna Fast Brain",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger_1",
+      "name": "When Executed by Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate input schema\nconst input = $input.first().json;\n\nif (!input.normalized) {\n  throw new Error('Missing normalized object in payload');\n}\n\n// Validate required fields\nconst required = ['user_id', 'chat_id', 'text', 'agent_id'];\nfor (const field of required) {\n  if (!input.normalized[field]) {\n    throw new Error(`Missing required field: ${field}`);\n  }\n}\n\nif (input.normalized.agent_id !== 'deanna') {\n  throw new Error(`Invalid agent_id: ${input.normalized.agent_id}. Expected: deanna`);\n}\n\nreturn { json: input };"
+      },
+      "id": "validate_1",
+      "name": "Validate Input Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "=sess:{{ $json.normalized.user_id }}:deanna:{{ $json.normalized.chat_id }}",
+        "keyType": "string"
+      },
+      "id": "load_session_1",
+      "name": "Load Session",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [440, -100],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "=affect:{{ $json.normalized.user_id }}:deanna:{{ $json.normalized.chat_id }}",
+        "keyType": "string"
+      },
+      "id": "load_affect_1",
+      "name": "Load Affect",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [440, 100],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const normalized = $('Validate Input Contract').first().json.normalized;\nconst sessionRaw = $('Load Session').first().json;\nconst affectRaw = $('Load Affect').first().json;\n\n// Parse session (may be null or string)\nlet session = {};\ntry {\n  if (sessionRaw && typeof sessionRaw === 'string') {\n    session = JSON.parse(sessionRaw);\n  } else if (sessionRaw && typeof sessionRaw === 'object' && sessionRaw.data) {\n    session = typeof sessionRaw.data === 'string' ? JSON.parse(sessionRaw.data) : sessionRaw.data;\n  }\n} catch (e) {\n  session = {};\n}\n\n// Parse affect (may be null or string)\nlet affect = null;\ntry {\n  if (affectRaw && typeof affectRaw === 'string') {\n    affect = JSON.parse(affectRaw);\n  } else if (affectRaw && typeof affectRaw === 'object' && affectRaw.data) {\n    affect = typeof affectRaw.data === 'string' ? JSON.parse(affectRaw.data) : affectRaw.data;\n  }\n} catch (e) {\n  affect = null;\n}\n\nreturn {\n  json: {\n    normalized,\n    session,\n    redis_affect: affect,\n    last_message: normalized.text\n  }\n};"
+      },
+      "id": "merge_1",
+      "name": "Merge Session and Affect",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst now = new Date();\n\nconst redisAffect = item.redis_affect ?? null;\nconst session = item.session ?? {};\nconst lastMsg = (item.last_message ?? \"\").toString();\n\n// Initialize affect if not present\nif (!redisAffect?.affect) {\n  item.redis_affect = {\n    slot_contract_version: \"1.0\",\n    user_id: item.normalized.user_id,\n    agent_id: \"deanna\",\n    authority: \"non-factual\",\n    stability: \"volatile\",\n    affect: {\n      label: \"neutral\",\n      confidence: 0,\n      markers: [],\n      decay_at: new Date(now.getTime() + 30*60*1000).toISOString(),\n      pulse: {\n        every_n_messages: 3,\n        last_pulse_at: now.toISOString(),\n        still_valid: true\n      }\n    },\n    interaction_mode: \"default\",\n    topic_focus: null,\n    active_entity_ids: [],\n    ts: now.toISOString()\n  };\n  return { json: item };\n}\n\nconst affect = redisAffect;\n\n// Rule 1: Temporal Decay\nif (new Date(affect.affect.decay_at) < now) {\n  affect.affect.label = \"neutral\";\n  affect.affect.confidence = 0.0;\n  affect.affect.markers = [\"expired_decay\"];\n}\n\n// Rule 2: Pulse decay every N messages\nconst msgCount = Number(session.msg_count ?? 0);\nconst pulseEvery = Number(affect.affect?.pulse?.every_n_messages ?? 3);\n\nif (msgCount > 0 && msgCount % pulseEvery === 0) {\n  const shortFunctional = lastMsg.trim().length < 10;\n  if (shortFunctional) affect.affect.confidence *= 0.7;\n  affect.affect.confidence *= 0.95;\n\n  affect.affect.pulse = {\n    every_n_messages: pulseEvery,\n    last_pulse_at: now.toISOString(),\n    still_valid: affect.affect.confidence >= 0.3\n  };\n}\n\n// Rule 3: Forced Flush\nif (affect.affect.confidence < 0.3) {\n  affect.affect.label = \"neutral\";\n  affect.affect.confidence = 0.0;\n  affect.affect.markers = [...(affect.affect.markers ?? []), \"forced_flush_low_conf\"];\n}\n\nitem.redis_affect = affect;\nreturn { json: item };"
+      },
+      "id": "pulse_decay_1",
+      "name": "Pulse and Decay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.normalized.text }}",
+        "options": {
+          "systemMessage": "You extract entities mentioned in user messages. Return ONLY valid JSON:\n{\n  \"entities\": [\n    {\"name\": \"string\", \"category\": \"string\", \"confidence\": 0.0-1.0}\n  ],\n  \"topic_signals\": [\"string\"]\n}\n\nCategories: Person, Location, Goal, Food, Habit, Event, Organization, Pet, Medication, Activity, Emotion, Preference, Other\n\nGuidelines:\n- Extract names of people, places, goals, food items, activities mentioned\n- Assign confidence based on clarity of mention\n- Topic signals are themes: family, health, work, planning, emotional, etc.\n- If no entities found, return empty arrays"
+        }
+      },
+      "id": "entity_extractor_1",
+      "name": "Entity Extractor",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-nano",
+          "mode": "list"
+        },
+        "options": {
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          },
+          "temperature": 0.1
+        }
+      },
+      "id": "gpt_nano_1",
+      "name": "GPT 4.1 Nano Extractor",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [1100, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "YVH71sPVLfeWvkG4",
+          "name": "OpenAi Legion"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Pulse and Decay').first().json;\nconst extractorOutput = $input.first().json.output;\n\n// Parse entity extraction\nlet extracted = { entities: [], topic_signals: [] };\ntry {\n  extracted = JSON.parse(extractorOutput);\n} catch (e) {\n  console.error('Failed to parse entity extraction:', e);\n}\n\nreturn {\n  json: {\n    ...prevData,\n    extracted_entities: extracted.entities || [],\n    topic_signals: extracted.topic_signals || []\n  }\n};"
+      },
+      "id": "parse_entities_1",
+      "name": "Parse Entities",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH extracted AS (\n  SELECT unnest($1::text[]) as name\n),\nresolved AS (\n  SELECT DISTINCT ON (e.name)\n    ent.entity_id,\n    ent.name,\n    ent.category,\n    ent.confidence,\n    ent.last_seen,\n    ent.scope\n  FROM extracted e\n  LEFT JOIN entities ent ON ent.name_normalized = lower(trim(e.name))\n    AND ent.user_id = $2::uuid\n    AND (ent.scope = 'global' OR (ent.scope = 'agent' AND ent.agent_id = 'deanna'))\n  WHERE ent.entity_id IS NOT NULL\n  ORDER BY e.name, \n    CASE WHEN ent.entity_id = ANY($3::uuid[]) THEN 0 ELSE 1 END,\n    ent.last_seen DESC NULLS LAST\n)\nSELECT * FROM resolved;",
+        "options": {}
+      },
+      "id": "entity_resolution_1",
+      "name": "Entity Resolution",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM get_local_subgraph(\n  $1::uuid,\n  'deanna',\n  $2::uuid[],\n  40\n);",
+        "options": {}
+      },
+      "id": "graph_hydrator_1",
+      "name": "Graph Hydrator",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Parse Entities').first().json;\nconst resolvedEntities = $('Entity Resolution').all().map(i => i.json);\nconst graphRelations = $('Graph Hydrator').all().map(i => i.json);\n\n// Merge resolved entity IDs with session active_entity_ids\nconst newEntityIds = resolvedEntities.map(e => e.entity_id).filter(Boolean);\nconst activeEntityIds = [...new Set([\n  ...(prevData.session?.active_entity_ids || []),\n  ...newEntityIds\n])].slice(0, 10); // Keep max 10 active entities\n\nreturn {\n  json: {\n    ...prevData,\n    resolved_entities: resolvedEntities,\n    graph_relations: graphRelations,\n    active_entity_ids: activeEntityIds\n  }\n};"
+      },
+      "id": "prepare_graph_1",
+      "name": "Prepare Graph Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "rag-condition",
+              "leftValue": "={{ $json.resolved_entities.length > 0 || /\\b(remember|last time|again|before|we talked|how am i|progress|feeling|reflect|help|advice|suggest)\\b/i.test($json.normalized.text) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "rag_gate_1",
+      "name": "RAG Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2200, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No RAG needed, pass through with empty hits\nconst prevData = $input.first().json;\n\nreturn {\n  json: {\n    ...prevData,\n    episode_hits: [],\n    knowledge_hits: []\n  }\n};"
+      },
+      "id": "skip_rag_1",
+      "name": "Skip RAG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 100]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "episode_vectors",
+          "mode": "id"
+        },
+        "prompt": "={{ $json.normalized.text }}",
+        "topK": 5
+      },
+      "id": "episode_retriever_1",
+      "name": "Episode Retriever",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [2420, -200]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "knowledge_vectors",
+          "mode": "id"
+        },
+        "prompt": "={{ $json.normalized.text }}",
+        "topK": 3
+      },
+      "id": "knowledge_retriever_1",
+      "name": "Knowledge Retriever",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [2640, -200]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small"
+      },
+      "id": "embeddings_1",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [2530, 0],
+      "credentials": {
+        "openAiApi": {
+          "id": "YVH71sPVLfeWvkG4",
+          "name": "OpenAi Legion"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Prepare Graph Data').first().json;\n\n// Try to get episode results\nlet episodeResults = [];\ntry {\n  episodeResults = $('Episode Retriever').all().map(i => i.json);\n} catch (e) {\n  episodeResults = [];\n}\n\n// Try to get knowledge results\nlet knowledgeResults = [];\ntry {\n  knowledgeResults = $('Knowledge Retriever').all().map(i => i.json);\n} catch (e) {\n  knowledgeResults = [];\n}\n\nreturn {\n  json: {\n    ...prevData,\n    episode_hits: episodeResults.map(e => ({\n      episode_id: e.metadata?.episode_id,\n      reflection: e.pageContent,\n      ts: e.metadata?.ts,\n      importance: e.metadata?.importance,\n      score: e.score\n    })).filter(e => e.score > 0.65),\n    knowledge_hits: knowledgeResults.map(k => ({\n      chunk_id: k.metadata?.chunk_id,\n      content: k.pageContent,\n      domain: k.metadata?.domain,\n      score: k.score\n    })).filter(k => k.score > 0.6)\n  }\n};"
+      },
+      "id": "merge_rag_1",
+      "name": "Merge RAG Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, -100]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "output": "first"
+      },
+      "id": "merge_branches_1",
+      "name": "Merge Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3080, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst envelope = {\n  slot_contract_version: \"1.0\",\n  user_id: data.normalized.user_id,\n  agent_id: \"deanna\",\n  chat_id: data.normalized.chat_id,\n\n  AFFECT: {\n    authority: \"non-factual\",\n    label: data.redis_affect?.affect?.label || \"neutral\",\n    confidence: data.redis_affect?.affect?.confidence || 0,\n    interaction_mode: data.redis_affect?.interaction_mode || \"default\",\n    markers: data.redis_affect?.affect?.markers || []\n  },\n\n  GRAPH: {\n    authority: \"authoritative\",\n    entities: data.resolved_entities || [],\n    relations: data.graph_relations || [],\n    edge_count: (data.graph_relations || []).length\n  },\n\n  EPISODE: {\n    authority: \"historical\",\n    hits: data.episode_hits || []\n  },\n\n  KNOWLEDGE: {\n    authority: \"static\",\n    hits: data.knowledge_hits || []\n  }\n};\n\nreturn {\n  json: {\n    ...data,\n    envelope\n  }\n};"
+      },
+      "id": "assemble_envelope_1",
+      "name": "Assemble Inference Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3300, 0]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=User message: {{ $json.normalized.text }}\n\nMemory Context:\n{{ JSON.stringify($json.envelope, null, 2) }}",
+        "options": {
+          "systemMessage": "You are Deanna, a thoughtful and empathetic AI counselor. You help users explore their thoughts, feelings, and goals through reflective conversation.\n\n## Memory Slots (Authority Ladder)\n\nYou have access to four memory slots, listed in order of authority:\n\n1. **GRAPH (authoritative)**: Facts about the user's identity, relationships, constraints. This OVERRIDES all other sources.\n2. **KNOWLEDGE (static)**: Your domain expertise in counseling. Applies unless GRAPH defines a personal exception.\n3. **EPISODE (historical)**: Past reflections and conversations. Provides context but must not overwrite GRAPH.\n4. **AFFECT (non-factual)**: Current emotional tone. Only affects your style, never becomes a fact.\n\n## Hard Rules\n\n1. If a claim is not supported by GRAPH, EPISODE, or KNOWLEDGE, ASK A QUESTION instead of asserting.\n2. Never promote AFFECT observations to declarative facts.\n3. Respect SAFETY_BOUNDARY and ALLERGY predicates absolutely.\n4. When entities are ambiguous, ask a disambiguation question.\n\n## Response Guidelines\n\n- Match the user's conversational stance and language\n- Acknowledge emotional undertones before offering perspectives\n- Be authentic, avoid clichés\n- If the user seems stressed (from AFFECT), be concise and supportive first\n\n## Memory Write Plan\n\nAfter your response, if you identified new facts or updates, include a JSON block:\n```json\n{\"memory_write_plan\": {\n  \"entities\": [{\"name\": \"...\", \"category\": \"...\", \"action\": \"create|update\"}],\n  \"relations\": [{\"subject\": \"...\", \"predicate\": \"...\", \"object\": \"...\", \"action\": \"create|update\"}],\n  \"affect_update\": {\"label\": \"...\", \"confidence\": 0.0-1.0, \"interaction_mode\": \"...\"},\n  \"needs_reflection\": true|false\n}}\n```"
+        }
+      },
+      "id": "main_llm_1",
+      "name": "Main LLM Deanna",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [3520, 0]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "gpt_4o_1",
+      "name": "GPT 4o Deanna",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [3520, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "YVH71sPVLfeWvkG4",
+          "name": "OpenAi Legion"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Validate Input Contract').first().json.normalized.user_id }}:deanna"
+      },
+      "id": "redis_memory_1",
+      "name": "Redis Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.5,
+      "position": [3520, 400],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Assemble Inference Envelope').first().json;\nconst llmOutput = $input.first().json.output;\n\n// Extract memory_write_plan if present\nlet memoryWritePlan = {\n  entities: [],\n  relations: [],\n  affect_update: null,\n  needs_reflection: false\n};\n\nlet responseText = llmOutput;\n\n// Try to extract JSON block from response\nconst jsonMatch = llmOutput.match(/```json\\s*({\"memory_write_plan\"[\\s\\S]*?})\\s*```/);\nif (jsonMatch) {\n  try {\n    const parsed = JSON.parse(jsonMatch[1]);\n    memoryWritePlan = parsed.memory_write_plan || memoryWritePlan;\n    // Remove JSON block from response\n    responseText = llmOutput.replace(/```json[\\s\\S]*?```/g, '').trim();\n  } catch (e) {\n    console.error('Failed to parse memory_write_plan:', e);\n  }\n}\n\nreturn {\n  json: {\n    ...prevData,\n    response: responseText,\n    memory_write_plan: memoryWritePlan,\n    processing_completed_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "parse_response_1",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3740, 0]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=sess:{{ $json.normalized.user_id }}:deanna:{{ $json.normalized.chat_id }}",
+        "value": "={{ JSON.stringify({ slot_contract_version: '1.0', user_id: $json.normalized.user_id, agent_id: 'deanna', chat_id: $json.normalized.chat_id, msg_count: ($json.session.msg_count || 0) + 1, summary: $json.session.summary || '', turns: [...($json.session.turns || []).slice(-10), { role: 'user', text: $json.normalized.text, ts: new Date().toISOString() }, { role: 'assistant', text: $json.response, ts: new Date().toISOString() }], scratch: $json.session.scratch || {}, active_entity_ids: $json.active_entity_ids || [], last_checkpoint_msg_id: $json.session.last_checkpoint_msg_id, updated_at: new Date().toISOString() }) }}",
+        "expire": true,
+        "ttl": 43200
+      },
+      "id": "update_session_1",
+      "name": "Update Session",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [3960, -200],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=affect:{{ $json.normalized.user_id }}:deanna:{{ $json.normalized.chat_id }}",
+        "value": "={{ JSON.stringify({ slot_contract_version: '1.0', user_id: $json.normalized.user_id, agent_id: 'deanna', authority: 'non-factual', stability: 'volatile', affect: { label: $json.memory_write_plan?.affect_update?.label || $json.redis_affect?.affect?.label || 'neutral', confidence: $json.memory_write_plan?.affect_update?.confidence ?? $json.redis_affect?.affect?.confidence ?? 0, markers: $json.redis_affect?.affect?.markers || [], decay_at: new Date(Date.now() + 30*60*1000).toISOString(), pulse: $json.redis_affect?.affect?.pulse || { every_n_messages: 3, last_pulse_at: new Date().toISOString(), still_valid: true } }, interaction_mode: $json.memory_write_plan?.affect_update?.interaction_mode || $json.redis_affect?.interaction_mode || 'default', topic_focus: $json.topic_signals?.[0] || $json.redis_affect?.topic_focus, active_entity_ids: $json.active_entity_ids || [], ts: new Date().toISOString() }) }}",
+        "expire": true,
+        "ttl": 1800
+      },
+      "id": "update_affect_1",
+      "name": "Update Affect",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [3960, 0],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "slow-brain-condition",
+              "leftValue": "={{ $json.memory_write_plan?.needs_reflection || (($json.session.msg_count || 0) + 1) % 10 === 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check_slow_brain_1",
+      "name": "Check Slow Brain Queue",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3960, 200]
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "key": "slow_brain_queue:deanna",
+        "value": "={{ JSON.stringify({ user_id: $json.normalized.user_id, chat_id: $json.normalized.chat_id, checkpoint_msg_id: $json.normalized.message_id, queued_at: new Date().toISOString() }) }}",
+        "tail": true
+      },
+      "id": "queue_slow_brain_1",
+      "name": "Queue Slow Brain",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [4180, 200],
+      "credentials": {
+        "redis": {
+          "id": "5v7lxsbhFMw87kAF",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Parse LLM Response').first().json;\n\nreturn {\n  json: {\n    response: data.response,\n    normalized: data.normalized,\n    processing_completed_at: data.processing_completed_at\n  }\n};"
+      },
+      "id": "prepare_output_1",
+      "name": "Prepare Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4400, 0]
+    },
+    {
+      "parameters": {},
+      "id": "end_1",
+      "name": "The End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4620, 0]
+    }
+  ],
+  "connections": {
+    "When Executed by Router": {
+      "main": [[{"node": "Validate Input Contract", "type": "main", "index": 0}]]
+    },
+    "Validate Input Contract": {
+      "main": [
+        [
+          {"node": "Load Session", "type": "main", "index": 0},
+          {"node": "Load Affect", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Load Session": {
+      "main": [[{"node": "Merge Session and Affect", "type": "main", "index": 0}]]
+    },
+    "Load Affect": {
+      "main": [[{"node": "Merge Session and Affect", "type": "main", "index": 1}]]
+    },
+    "Merge Session and Affect": {
+      "main": [[{"node": "Pulse and Decay", "type": "main", "index": 0}]]
+    },
+    "Pulse and Decay": {
+      "main": [[{"node": "Entity Extractor", "type": "main", "index": 0}]]
+    },
+    "GPT 4.1 Nano Extractor": {
+      "ai_languageModel": [[{"node": "Entity Extractor", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Entity Extractor": {
+      "main": [[{"node": "Parse Entities", "type": "main", "index": 0}]]
+    },
+    "Parse Entities": {
+      "main": [[{"node": "Entity Resolution", "type": "main", "index": 0}]]
+    },
+    "Entity Resolution": {
+      "main": [[{"node": "Graph Hydrator", "type": "main", "index": 0}]]
+    },
+    "Graph Hydrator": {
+      "main": [[{"node": "Prepare Graph Data", "type": "main", "index": 0}]]
+    },
+    "Prepare Graph Data": {
+      "main": [[{"node": "RAG Gate", "type": "main", "index": 0}]]
+    },
+    "RAG Gate": {
+      "main": [
+        [{"node": "Episode Retriever", "type": "main", "index": 0}],
+        [{"node": "Skip RAG", "type": "main", "index": 0}]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {"node": "Episode Retriever", "type": "ai_embedding", "index": 0},
+          {"node": "Knowledge Retriever", "type": "ai_embedding", "index": 0}
+        ]
+      ]
+    },
+    "Episode Retriever": {
+      "main": [[{"node": "Knowledge Retriever", "type": "main", "index": 0}]]
+    },
+    "Knowledge Retriever": {
+      "main": [[{"node": "Merge RAG Results", "type": "main", "index": 0}]]
+    },
+    "Merge RAG Results": {
+      "main": [[{"node": "Merge Branches", "type": "main", "index": 0}]]
+    },
+    "Skip RAG": {
+      "main": [[{"node": "Merge Branches", "type": "main", "index": 1}]]
+    },
+    "Merge Branches": {
+      "main": [[{"node": "Assemble Inference Envelope", "type": "main", "index": 0}]]
+    },
+    "Assemble Inference Envelope": {
+      "main": [[{"node": "Main LLM Deanna", "type": "main", "index": 0}]]
+    },
+    "GPT 4o Deanna": {
+      "ai_languageModel": [[{"node": "Main LLM Deanna", "type": "ai_languageModel", "index": 0}]]
+    },
+    "Redis Chat Memory": {
+      "ai_memory": [[{"node": "Main LLM Deanna", "type": "ai_memory", "index": 0}]]
+    },
+    "Main LLM Deanna": {
+      "main": [[{"node": "Parse LLM Response", "type": "main", "index": 0}]]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {"node": "Update Session", "type": "main", "index": 0},
+          {"node": "Update Affect", "type": "main", "index": 0},
+          {"node": "Check Slow Brain Queue", "type": "main", "index": 0},
+          {"node": "Prepare Output", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Check Slow Brain Queue": {
+      "main": [
+        [{"node": "Queue Slow Brain", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Prepare Output": {
+      "main": [[{"node": "The End", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
