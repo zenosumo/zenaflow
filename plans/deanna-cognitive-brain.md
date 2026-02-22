@@ -54,7 +54,7 @@ Implement a cognitive brain workflow for **Deanna** (AI counselor agent) based o
 
 ### ✅ 1.2 Vector Store (Qdrant)
 
-**Qdrant IP:** `172.18.0.5:6333` (Docker internal network)
+**Qdrant Endpoint:** `qdrant:6333` (Docker internal DNS on `core_net`)
 
 #### Collections Created
 
@@ -101,25 +101,27 @@ Three workflows need to be created in n8n:
 │                        DEANNA ROUTER                                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  [Telegram Trigger] ─→ [Normalize Payload] ─→ [Check User Access]   │
-│         │                                              │             │
-│         │                                              ▼             │
-│         │                                    ┌─────────────────┐     │
-│         │                                    │  Access Gate    │     │
-│         │                                    │    (If Node)    │     │
-│         │                                    └────────┬────────┘     │
-│         │                                   Authorized│ Not Auth    │
-│         │                                             ▼             ▼ │
-│         │                            [Execute Fast Brain]  [Send Deny]│
-│         │                                             │              │
-│         │                                             ▼              │
-│         │                                    [Format Response]       │
-│         │                                             │              │
-│         │                                             ▼              │
-│         └────────────────────────────────→ [Send Telegram Response] │
-│                                                       │              │
-│                                                       ▼              │
-│                                             [Log to chat_messages]   │
+│  [Telegram Trigger] ─→ [Normalize Payload] ─→ [Resolve + Authorize] │
+│                                                (resolve_user_app_*)   │
+│                                                       │               │
+│                                                       ▼               │
+│                                              [Access Gate (If)]       │
+│                                            Authorized│Not Authorized  │
+│                                                       │               │
+│                                                       ▼               │
+│                        [Insert Pending chat_messages (dedupe)] [Send Deny]  │
+│                                          │                            │
+│                                          ▼                            │
+│                               [Execute Fast Brain]                    │
+│                                          │                            │
+│                                          ▼                            │
+│                                   [Format Response]                   │
+│                                          │                            │
+│                                          ▼                            │
+│                              [Send Telegram Response]                 │
+│                                          │                            │
+│                                          ▼                            │
+│                               [Complete chat_messages]                │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -129,13 +131,15 @@ Three workflows need to be created in n8n:
 | Node | Type | Configuration |
 |------|------|---------------|
 | Telegram Trigger | n8n-nodes-base.telegramTrigger | Credential: Deanna Bot, Updates: message |
-| Normalize Payload | n8n-nodes-base.code | Extract user_id, chat_id, text, platform info |
-| Check User Access | n8n-nodes-base.postgres | Query user_applications for deanna access |
-| Access Gate | n8n-nodes-base.if | Check if user has access |
+| Normalize Payload | n8n-nodes-base.code | Extract telegram_user_id, telegram_id, chat_id, text, platform info |
+| Resolve + Authorize User | n8n-nodes-base.postgres | Call `resolve_user_app_access('deanna', telegram_user_id, telegram_id)` |
+| Access Gate | n8n-nodes-base.if | Continue only when decision is `authorized` (fail-closed) |
+| Insert Pending chat_messages | n8n-nodes-base.postgres | Insert pending row with dedupe by `(platform, message_id)` |
 | Execute Fast Brain | n8n-nodes-base.executeWorkflow | Call Deanna Fast Brain workflow |
 | Format Response | n8n-nodes-base.set | Prepare response for Telegram |
 | Send Telegram Response | n8n-nodes-base.telegram | Send response to user |
-| Log to chat_messages | n8n-nodes-base.postgres | INSERT into chat_messages table |
+| Complete chat_messages | n8n-nodes-base.postgres | Update pending row to `completed` with response text |
+| Send Deny | n8n-nodes-base.telegram | Reject blocked/suspended/unauthorized users with clear message |
 
 #### Normalize Payload Code
 ```javascript
@@ -155,6 +159,52 @@ return {
   },
   raw: msg
 };
+```
+
+#### Resolve + Authorize User (PostgreSQL)
+```sql
+SELECT *
+FROM resolve_user_app_access(
+  'deanna'::text,
+  $1::bigint,      -- telegram_user_id (preferred)
+  $2::text         -- telegram_id with @ prefix (fallback)
+);
+```
+
+**Router contract:**
+- Input params: `normalized.telegram_user_id`, `normalized.telegram_id`
+- Output fields: `user_id`, `user_app_id`, `app_id`, `decision`, `user_status`, `active_after`
+- Allowed continuation: `decision = 'authorized'`
+- Deny decisions: `unknown_user`, `blocked`, `suspended`, `app_inactive`, `no_app_access`
+
+#### Insert Pending `chat_messages` (PostgreSQL)
+```sql
+INSERT INTO chat_messages (
+  user_app_id,
+  request_text,
+  source_payload,
+  status
+) VALUES (
+  $1::uuid,        -- authorized user_app_id
+  $2::text,        -- request text
+  $3::jsonb,       -- normalized platform payload
+  'pending'
+)
+ON CONFLICT ((source_payload->>'platform'), (source_payload->>'message_id'))
+DO NOTHING
+RETURNING message_id;
+```
+
+**Idempotency rule:** if no row is returned, treat as duplicate webhook delivery and stop the workflow before Fast Brain.
+
+#### Complete `chat_messages` (PostgreSQL)
+```sql
+UPDATE chat_messages
+SET
+  response_text = $2::text,
+  status = 'completed',
+  responded_at = NOW()
+WHERE message_id = $1::uuid;
 ```
 
 ---
@@ -197,16 +247,15 @@ return {
 │  [Graph Hydrator] (PostgreSQL: get_local_subgraph)                          │ │
 │           │                                                                 │ │
 │           ▼                                                                 │ │
-│  [RAG Gate] ─────────────┬──────────────────────────────┐                   │ │
-│           │              │                              │                   │ │
-│   should_retrieve   should_retrieve              no retrieval              │ │
-│     episodes?         knowledge?                  needed                   │ │
-│           │              │                              │                   │ │
-│           ▼              ▼                              │                   │ │
-│  [Episode Retriever] [Knowledge Retriever]              │                   │ │
-│      (Qdrant)           (Qdrant)                        │                   │ │
-│           │              │                              │                   │ │
-│           └──────────────┴──────────────────────────────┘                   │ │
+│  [Compute Retrieval Flags] ───────────────┬───────────────────────────────┐  │ │
+│         (Code Node)                        │                               │  │ │
+│           │                                │                               │  │ │
+│           ▼                                ▼                               ▼  │ │
+│   [If Episodes]                     [If Knowledge]                [Set Defaults]│ │
+│   true → Episode Retriever          true → Knowledge Retriever    episode_results=[]│
+│   false → skip                      false → skip                  knowledge_results=[]│
+│           │                                │                               │  │ │
+│           └────────────────────────────────┴───────────────────────────────┘  │ │
 │                          │                                                   │ │
 │                          ▼                                                   │ │
 │  [Assemble Inference Envelope]                                              │ │
@@ -346,18 +395,43 @@ SELECT * FROM get_local_subgraph(
 );
 ```
 
-##### RAG Gate (If Node)
+##### Compute Retrieval Flags (Code Node)
 ```javascript
-// Trigger retrieval if:
-const text = $json.normalized.text.toLowerCase();
-const hasEntityMention = $json.resolved_entities?.length > 0;
-const hasContinuitySignal = /\b(remember|last time|again|before|we talked)\b/i.test(text);
-const hasReflectionRequest = /\b(how am i|progress|feeling|reflect)\b/i.test(text);
+for (const item of items) {
+  const text = (item.json.normalized?.text || "").toLowerCase();
+  const hasEntityMention = (item.json.resolved_entities?.length || 0) > 0;
+  const hasContinuitySignal = /\b(remember|last time|again|before|we talked)\b/i.test(text);
+  const hasReflectionRequest = /\b(how am i|progress|feeling|reflect)\b/i.test(text);
 
-return {
-  should_retrieve_episodes: hasEntityMention || hasContinuitySignal || hasReflectionRequest,
-  should_retrieve_knowledge: hasReflectionRequest || /\b(help|advice|suggest)\b/i.test(text)
-};
+  item.json.should_retrieve_episodes =
+    hasEntityMention || hasContinuitySignal || hasReflectionRequest;
+
+  item.json.should_retrieve_knowledge =
+    hasReflectionRequest || /\b(help|advice|suggest)\b/i.test(text);
+}
+
+return items;
+```
+
+##### If Episodes (If Node)
+```
+Condition: {{ $json.should_retrieve_episodes }} is true
+True branch: Episode Retriever
+False branch: pass-through
+```
+
+##### If Knowledge (If Node)
+```
+Condition: {{ $json.should_retrieve_knowledge }} is true
+True branch: Knowledge Retriever
+False branch: pass-through
+```
+
+##### Set Defaults for No Retrieval (Set Node)
+```
+Always ensure downstream contract:
+  - episode_results = [] when episodes branch is skipped
+  - knowledge_results = [] when knowledge branch is skipped
 ```
 
 ##### Episode Retriever (Qdrant Vector Store)
@@ -455,7 +529,14 @@ TTL: 1800 (30 minutes)
 ```
 Key: slow_brain_queue:deanna
 Operation: LPUSH
-Value: { user_id, chat_id, checkpoint_msg_id, queued_at }
+Value: {
+  task_id,
+  user_id,
+  chat_id,
+  checkpoint_msg_id,
+  queued_at,
+  retry_count: 0
+}
 Condition: msg_count % 10 == 0 OR memory_write_needed flag
 ```
 
@@ -470,12 +551,21 @@ Condition: msg_count % 10 == 0 OR memory_write_needed flag
 │                           DEANNA SLOW BRAIN                                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
-│  [Schedule Trigger] ──→ [Check Queue] ──→ [Empty?] ──→ [Stop]                │
-│     (Every 5 min)         (Redis)           Yes                              │
+│  [Schedule Trigger] ──→ [Acquire Run Lock] ──→ [Lock Acquired?] ──→ [Stop]   │
+│     (Every 5 min)           (SET NX EX)               No                      │
 │                              │                                                │
-│                              │ No (has items)                                 │
+│                              │ Yes                                             │
 │                              ▼                                                │
-│                    [Loop Over Queue Items]                                    │
+│                    [Claim Task] (RPOPLPUSH queue → processing)                │
+│                              │                                                │
+│                              ▼                                                │
+│                    [Task Claimed?] ──→ [Release Lock + Stop]                  │
+│                         No                                                     │
+│                              │ Yes                                             │
+│                              ▼                                                │
+│                    [Idempotency Guard] (SET NX done:task_id)                  │
+│                              │                                                │
+│                              ├─ Already Done ─→ [ACK Task] ─→ [Claim Next]    │
 │                              │                                                │
 │                              ▼                                                │
 │                    [Load Session Context] (Redis)                             │
@@ -484,7 +574,7 @@ Condition: msg_count % 10 == 0 OR memory_write_needed flag
 │                    [Get Turns Since Checkpoint]                               │
 │                              │                                                │
 │                              ▼                                                │
-│                    [Enough Turns?] ──→ [Skip] ──→ [Next Item]                │
+│                    [Enough Turns?] ──→ [Skip + ACK] ──→ [Claim Next]         │
 │                        (< 3 turns)                                            │
 │                              │                                                │
 │                              │ Yes (≥ 3 turns)                                │
@@ -506,14 +596,9 @@ Condition: msg_count % 10 == 0 OR memory_write_needed flag
 │                              ▼                                                │
 │                    [Update Session Checkpoint] (Redis)                        │
 │                              │                                                │
-│                              ▼                                                │
-│                    [Remove from Queue] (Redis LPOP)                           │
+│                              ├─ Success ──────────→ [ACK Task] ─→ [Claim Next]│
 │                              │                                                │
-│                              ▼                                                │
-│                    [Conflict Resolution] (Optional)                           │
-│                              │                                                │
-│                              ▼                                                │
-│                         [Next Item]                                           │
+│                              └─ Failure ─→ [Retry/DLQ + ACK] ─→ [Claim Next]  │
 │                                                                               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -525,10 +610,58 @@ Condition: msg_count % 10 == 0 OR memory_write_needed flag
 Interval: Every 5 minutes
 ```
 
-##### Check Queue (Redis)
+##### Acquire Run Lock (Redis)
 ```
-Key: slow_brain_queue:deanna
-Operation: LRANGE 0 10
+Key: slow_brain_lock:deanna
+Operation: SET
+Value: {{ $execution.id }}
+Mode: NX
+TTL: 300 seconds
+```
+
+##### Claim Task (Redis)
+```
+Operation: RPOPLPUSH
+Source: slow_brain_queue:deanna
+Destination: slow_brain_processing:deanna
+If null: no task available for this run
+```
+
+##### Idempotency Guard (Redis)
+```
+Key: slow_brain_done:deanna:{{ $json.task_id }}
+Operation: SET
+Value: 1
+Mode: NX
+TTL: 604800 seconds (7 days)
+If SET fails: task already processed, ACK and continue
+```
+
+##### ACK Task (Redis)
+```
+Operation: LREM
+Key: slow_brain_processing:deanna
+Count: 1
+Value: {{ $json.raw_claimed_task }}
+```
+
+##### Retry/DLQ on Failure (Redis)
+```
+If retry_count < 5:
+  - Increment retry_count
+  - LPUSH slow_brain_queue:deanna <updated_task_payload>
+  - ACK original from processing list
+
+If retry_count >= 5:
+  - LPUSH slow_brain_dlq:deanna <task_payload_with_error>
+  - ACK original from processing list
+```
+
+##### Release Run Lock (Redis)
+```
+Operation: DEL
+Key: slow_brain_lock:deanna
+Note: lock TTL also protects against worker crash
 ```
 
 ##### Generate Reflection (OpenAI)
@@ -567,7 +700,7 @@ INSERT INTO episodes (
 ##### Upsert to Qdrant (HTTP Request)
 ```
 Method: PUT
-URL: http://172.18.0.5:6333/collections/episode_vectors/points
+URL: http://qdrant:6333/collections/episode_vectors/points
 Body: {
   "points": [{
     "id": "{{ $json.episode_id }}",
@@ -637,7 +770,7 @@ When you identify new facts or updates, include a memory_write_plan in your resp
 |---------|-----------------|-----------------|-------------|
 | PostgreSQL | `postgres:5432` | SSH tunnel `localhost:5432` | User: `zenaflow_user`, DB: `zenaflow` |
 | Redis | `redis:6379` | SSH tunnel | No auth |
-| Qdrant | `172.18.0.5:6333` | SSH tunnel `localhost:6333` | No auth |
+| Qdrant | `qdrant:6333` | SSH tunnel `localhost:6333` | No auth |
 | n8n | `127.0.0.1:5678` | `workflow.zenaflow.com` | Via UI |
 | OpenAI | External API | N/A | API Key in n8n credentials |
 
@@ -651,16 +784,19 @@ When you identify new facts or updates, include a memory_write_plan in your resp
 - [x] Create Qdrant collection: episode_vectors
 - [x] Create Qdrant collection: knowledge_vectors
 - [x] Create payload indexes for both collections
+- [ ] Execute migration `doc/migrations/002_digital_twin_memory.sql` (access-control hardening)
 
 ### Phase 2: n8n Workflows (Pending)
 - [ ] Create Deanna Router workflow
   - [ ] Telegram Trigger with Deanna Bot credentials
   - [ ] Normalize Payload node
-  - [ ] Check User Access (PostgreSQL query)
-  - [ ] Access Gate (If node)
+  - [ ] Resolve + Authorize User (PostgreSQL function call)
+  - [ ] Access Gate with fail-closed decision checks
+  - [ ] Insert pending chat_messages row with dedupe handling
   - [ ] Execute Fast Brain call
   - [ ] Send Telegram Response
-  - [ ] Log to chat_messages
+  - [ ] Complete chat_messages row (status=completed, responded_at)
+  - [ ] Send deny response for non-authorized decisions
 
 - [ ] Create Deanna Fast Brain workflow
   - [ ] Execute Workflow Trigger
@@ -671,7 +807,10 @@ When you identify new facts or updates, include a memory_write_plan in your resp
   - [ ] Entity Extractor (GPT-4.1-nano)
   - [ ] Entity Resolution (PostgreSQL)
   - [ ] Graph Hydrator (PostgreSQL)
-  - [ ] RAG Gate (If)
+  - [ ] Compute Retrieval Flags (Code)
+  - [ ] If Episodes (If)
+  - [ ] If Knowledge (If)
+  - [ ] Set retrieval defaults for skipped branches
   - [ ] Episode Retriever (Qdrant)
   - [ ] Knowledge Retriever (Qdrant)
   - [ ] Assemble Inference Envelope
@@ -686,8 +825,9 @@ When you identify new facts or updates, include a memory_write_plan in your resp
 
 - [ ] Create Deanna Slow Brain workflow
   - [ ] Schedule Trigger (5 minutes)
-  - [ ] Check Queue (Redis LRANGE)
-  - [ ] Loop Over Queue Items
+  - [ ] Acquire run lock (Redis SET NX EX)
+  - [ ] Claim task atomically (Redis RPOPLPUSH queue → processing)
+  - [ ] Idempotency guard (SET NX done:task_id)
   - [ ] Load Session Context
   - [ ] Get Turns Since Checkpoint
   - [ ] Generate Reflection (GPT-4.1-nano)
@@ -696,7 +836,9 @@ When you identify new facts or updates, include a memory_write_plan in your resp
   - [ ] Generate Embedding (OpenAI)
   - [ ] Upsert to Qdrant
   - [ ] Update Session Checkpoint
-  - [ ] Remove from Queue (Redis LPOP)
+  - [ ] ACK task from processing list (Redis LREM)
+  - [ ] Retry or DLQ failed tasks
+  - [ ] Release run lock
 
 ### Phase 3: Testing (Pending)
 - [ ] Verify Telegram trigger receives messages
@@ -713,6 +855,8 @@ When you identify new facts or updates, include a memory_write_plan in your resp
 - [ ] End-to-end conversation test
 - [ ] Test disambiguation ("which Marta?")
 - [ ] Test affect decay over time
+- [ ] Test slow-brain queue idempotency (duplicate deliveries)
+- [ ] Test slow-brain retry/DLQ behavior on failures
 
 ---
 
@@ -723,6 +867,7 @@ When you identify new facts or updates, include a memory_write_plan in your resp
 | [doc/digital_twin_memory.md](../doc/digital_twin_memory.md) | Source specification |
 | [doc/schema.sql](../doc/schema.sql) | Existing core schema |
 | [doc/migrations/001_digital_twin_memory.sql](../doc/migrations/001_digital_twin_memory.sql) | Memory schema migration |
+| [doc/migrations/002_digital_twin_memory.sql](../doc/migrations/002_digital_twin_memory.sql) | Access-control hardening migration |
 | [doc/migrations/001_deanna_cognitive_brain_plan.md](../doc/migrations/001_deanna_cognitive_brain_plan.md) | Initial plan (archived) |
 | [docker/docker-compose.yml](../docker/docker-compose.yml) | Service configuration |
 
