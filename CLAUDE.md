@@ -130,21 +130,27 @@ Environment loading (scripts/env.sh) sets up fnm (Fast Node Manager) path.
 
 **IMPORTANT: Docker commands are only available in VPS Production environment (`ZENAFLOW_ENV=VPS_PRODUCTION`). Do not run these in local development.**
 
+**CRITICAL: Always run docker compose commands from `/opt/core`, NOT `/opt/zenaflow/docker`.**
+Running from `/opt/zenaflow/docker` creates a separate project context and causes container name conflicts.
+
 ```bash
 # Start all services
-cd docker && docker compose up -d
+cd /opt/core && docker compose up -d
 
 # View logs
-docker compose logs -f [service_name]
+cd /opt/core && docker compose logs -f [service_name]
 
 # Stop all services
-docker compose down
+cd /opt/core && docker compose down
 
 # Restart specific service
-docker compose restart [service_name]
+cd /opt/core && docker compose restart [service_name]
 
 # View service status
-docker compose ps
+cd /opt/core && docker compose ps
+
+# Verify correct project (should show "core")
+docker compose ls
 ```
 
 ### Database Access
