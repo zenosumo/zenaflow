@@ -8,7 +8,7 @@ ssh root@core.zenaflow.com
 
 ### 1.2 SCP (Download Docker Compose)
 ```
-scp root@core.zenaflow.com:/opt/core/docker-compose.yml ./docker-compose.yml
+scp root@core.zenaflow.com:/opt/zenaflow/docker/docker-compose.yml ./docker-compose.yml
 ```
 
 ### 1.3 SSH Tunnel (RedisInsight)
@@ -20,30 +20,44 @@ Browser:
 http://localhost:5555
 ```
 
-### 1.4 Hetzner Console
+### 1.4 SSH Tunnel (pgAdmin)
+```
+ssh -L 8889:localhost:8889 root@core.zenaflow.com
+```
+Browser:
+```
+http://localhost:8889
+```
+
+### 1.5 Hetzner Console
 Always works even if SSH/firewall is broken.
 
 ---
 
 ## 2. FILESYSTEM STRUCTURE
 ```
-/opt/core
-   docker-compose.yml
-   /data/
-      postgres/
-      redis/
-      qdrant/
-      n8n/
-```
+/opt/zenaflow                    ← git repo (infra config)
+   CLAUDE.md
+   docker/
+      docker-compose.yml         ← symlinked from /opt/core/docker-compose.yml
+   caddy/
+      Caddyfile                  ← symlinked from /opt/core/Caddyfile
+   doc/
+   plans/
 
-### N8N Workflows
-```
-/opt/core/data/n8n
-```
+/opt/core                        ← runtime data (not in git)
+   docker-compose.yml            → symlink → /opt/zenaflow/docker/docker-compose.yml
+   Caddyfile                     → symlink → /opt/zenaflow/caddy/Caddyfile
+   .env                          ← POSTGRES_PASSWORD and other secrets
+   n8n_data/
+   postgres_data/
+   redis_data/
+   qdrant_storage/
+   pgadmin_data/
+   pgadmin_config/servers.json
+   hermes_data/                  ← Hermes agent state (memories, skills, sessions)
 
-### Caddy Config
-```
-/etc/caddy/Caddyfile
+/opt/vault                       ← second brain vault (Phase 6, not yet deployed)
 ```
 
 ---
@@ -51,7 +65,7 @@ Always works even if SSH/firewall is broken.
 ## 3. NETWORK & DOCKER ARCHITECTURE
 Public ports:
 - 22/tcp (SSH)
-- 80/tcp (HTTP)
+- 80/tcp (HTTP → redirected to HTTPS by Caddy)
 - 443/tcp (HTTPS)
 
 ### Docker Network
@@ -61,20 +75,38 @@ Subnet: 172.18.0.0/16
 ```
 
 ### Container IP Map
-| Service | IP | Ports |
-|---------|-------------|--------|
-| n8n | 172.18.0.2 | 5678 |
-| qdrant | 172.18.0.3 | 6333/6334 |
-| redis | 172.18.0.4 | 6379 |
-| postgres | 172.18.0.5 | 5432 |
-| redisinsight | 172.18.0.6 | 5540 |
+| Service      | IP          | Host Port (bound to 127.0.0.1) |
+|--------------|-------------|-------------------------------|
+| n8n          | 172.18.0.3  | 5678                          |
+| postgres     | 172.18.0.5  | 5432                          |
+| redis        | 172.18.0.2  | —                             |
+| qdrant       | 172.18.0.7  | —                             |
+| redisinsight | 172.18.0.4  | 5540                          |
+| pgadmin      | 172.18.0.6  | 8889                          |
+| hermes       | 172.18.0.8  | 8642 (API), 9119 (dashboard)  |
 
 ---
 
 ## 4. CADDY REVERSE PROXY
+
+Config: `/opt/zenaflow/caddy/Caddyfile` (source of truth)
+
 ```
-workflow.zenaflow.com → 127.0.0.1:5678
-webhook.zenaflow.com  → 127.0.0.1:5678
+workflow.zenaflow.com → 127.0.0.1:5678   (n8n editor)
+webhook.zenaflow.com  → 127.0.0.1:5678   (n8n webhooks)
+argo.zenaflow.com     → 127.0.0.1:9119   (Hermes dashboard)
+```
+
+All domains:
+- SSL via Cloudflare (proxied, orange cloud)
+- Cloudflare trusted proxy IPs configured in global block
+- JSON access logs with 10MiB rotation, 7 files, 336h retention
+
+Log files:
+```
+/var/log/caddy/workflow_access.log
+/var/log/caddy/webhook_access.log
+/var/log/caddy/argo_access.log
 ```
 
 ---
@@ -82,84 +114,148 @@ webhook.zenaflow.com  → 127.0.0.1:5678
 ## 5. SECURITY
 
 ### 5.1 SSH Hardening
-- PasswordAuthentication no  
-- KbdInteractiveAuthentication no  
-- PubkeyAuthentication yes  
-- PermitRootLogin without-password  
-- UsePAM yes  
+- PasswordAuthentication no
+- KbdInteractiveAuthentication no
+- PubkeyAuthentication yes
+- PermitRootLogin without-password
+- UsePAM yes
 
 ### 5.2 UFW Firewall
 Default:
-- incoming: deny  
-- outgoing: allow  
+- incoming: deny
+- outgoing: allow
 
 Allowed:
-- 22/tcp  
-- 80/tcp  
-- 443/tcp  
+- 22/tcp
+- 80/tcp
+- 443/tcp
 
 ### 5.3 Fail2Ban
 Active jails:
-- sshd  
-- caddy-login  
-- caddy-webhook  
-- recidive  
+- sshd
+- caddy-login
+- caddy-webhook
+- recidive
 
 Logpaths:
-- /var/log/auth.log  
-- /var/log/caddy/workflow_access.log  
-- /var/log/caddy/webhook_access.log  
+- /var/log/auth.log
+- /var/log/caddy/workflow_access.log
+- /var/log/caddy/webhook_access.log
+
+### 5.4 Cloudflare Access (Zero Trust)
+`argo.zenaflow.com` is protected by Cloudflare Access in addition to Caddy.
+
+- Team: `zenaflow.cloudflareaccess.com`
+- Application: `Hermes Dashboard`
+- Policy: Allow — email allowlist (zenotempo@gmail.com)
+- Session duration: 24 hours
+- Auth method: one-time email code (OTP)
+
+Any unauthenticated request to `argo.zenaflow.com` is intercepted by Cloudflare
+and redirected to the login page before reaching the VPS.
 
 ---
 
-## 6. TOOLING
-- Caddy: /etc/caddy  
-- Docker: /opt/core  
-- N8N: container + /opt/core/data/n8n  
-- PostgreSQL: internal  
-- Redis: internal  
-- Qdrant: internal  
+## 6. SERVICES
+
+### n8n
+- URL: workflow.zenaflow.com (editor), webhook.zenaflow.com (webhooks)
+- Data: /opt/core/n8n_data
+- DB: PostgreSQL `n8n` database
+
+### Hermes Agent
+- Dashboard: argo.zenaflow.com (Cloudflare Access protected)
+- Gateway API: 127.0.0.1:8642 (internal only)
+- Telegram: connected (bot token in hermes_data/.env)
+- Data: /opt/core/hermes_data
+- Image: nousresearch/hermes-agent:latest
+
+### PostgreSQL
+- Two databases: `n8n` (system) and `zenaflow` (application)
+- Two roles: `n8n` (superuser) and `zenaflow_user` (restricted)
+- Data: /opt/core/postgres_data
+
+### Redis
+- AOF persistence enabled
+- Data: /opt/core/redis_data
+
+### Qdrant
+- Vector DB for AI/embeddings
+- Storage: /opt/core/qdrant_storage
+
+### pgAdmin
+- Access: 127.0.0.1:8889 (SSH tunnel required from local)
+- Data: /opt/core/pgadmin_data
+
+### RedisInsight
+- Access: 127.0.0.1:5540 (SSH tunnel required from local)
 
 ---
 
 ## 7. EXPOSURE SURFACE
-Only:
-- SSH
-- HTTP
+Public:
+- SSH (key-only)
+- HTTP (redirects to HTTPS)
 - HTTPS
 
-Everything else internal.
+Internal only (never exposed):
+- PostgreSQL (5432)
+- Redis (6379)
+- Qdrant (6333/6334)
+- Hermes API (8642)
+- Hermes dashboard direct (9119) — proxied via Caddy + Cloudflare Access
+- pgAdmin (8889)
+- RedisInsight (5540)
 
 ---
 
 ## 8. OPERATIONAL COMMANDS
 
-### Firewall
+### Docker Stack
+```bash
+# IMPORTANT: always run from /opt/core
+cd /opt/core && docker compose up -d
+cd /opt/core && docker compose ps
+cd /opt/core && docker compose logs -f [service]
+cd /opt/core && docker compose restart [service]
+cd /opt/core && docker compose down
 ```
+
+### Caddy
+```bash
+caddy validate --config /opt/zenaflow/caddy/Caddyfile
+sudo caddy reload --config /opt/zenaflow/caddy/Caddyfile
+tail -f /var/log/caddy/workflow_access.log
+```
+
+### Firewall
+```bash
 ufw status verbose
 ufw allow XX
 ufw delete allow XX
 ```
 
 ### Fail2Ban
-```
+```bash
 fail2ban-client status
 fail2ban-client status sshd
 fail2ban-client set sshd unbanip <IP>
+fail2ban-client unban --all
 ```
 
-### Docker
-```
-docker ps
-docker logs n8n
-docker-compose -f /opt/core/docker-compose.yml up -d
-```
+### Database
+```bash
+# PostgreSQL shell
+docker exec -it postgres psql -U n8n -d n8n
 
-### Editing Files (Micro)
-```
-micro /etc/ssh/sshd_config
-micro /etc/caddy/Caddyfile
-micro /opt/core/docker-compose.yml
+# Redis CLI
+docker exec -it redis redis-cli
+
+# Backup n8n DB
+docker exec postgres pg_dump -U n8n n8n > /tmp/n8n_backup.sql
+
+# Backup zenaflow DB
+docker exec postgres pg_dump -U n8n zenaflow > /tmp/zenaflow_backup.sql
 ```
 
 ---
@@ -186,10 +282,10 @@ systemctl stop fail2ban
 ---
 
 ## 10. SUMMARY
-- Secure, minimal, production-ready stack  
-- Docker isolated services  
-- Key-only SSH  
-- UFW active  
-- Fail2Ban active  
-- Internal-only DBs  
-- Caddy handling HTTPS  
+- Secure, minimal, production-ready stack
+- Docker isolated services on core_core_net (172.18.0.0/16)
+- Key-only SSH, UFW active, Fail2Ban active
+- Caddy handles HTTPS with Cloudflare trusted proxy
+- Internal-only DBs and services
+- Hermes Agent running with Telegram + dashboard
+- Dashboard protected by Cloudflare Zero Trust Access
