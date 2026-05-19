@@ -4,3 +4,10 @@ secrets/
 *.key
 *.pem
 node_modules/
+
+# Shell dotfiles and SSH keys — not part of this repo
+.ssh/
+.bashrc
+.profile
+.zshrc
+.bash_history

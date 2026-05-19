@@ -32,6 +32,13 @@ http://localhost:8889
 ### 1.5 Hetzner Console
 Always works even if SSH/firewall is broken.
 
+### 1.6 Tailscale + Samba (File Access from macOS Finder)
+VPS is on Tailscale as `core-hub-01` (100.75.180.124). Connect in Finder:
+```
+smb://core-hub-01/share
+```
+Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
+
 ---
 
 ## 2. FILESYSTEM STRUCTURE
@@ -67,6 +74,12 @@ Public ports:
 - 22/tcp (SSH)
 - 80/tcp (HTTP → redirected to HTTPS by Caddy)
 - 443/tcp (HTTPS)
+- 41641/udp (Tailscale direct connections)
+
+### Tailscale Network
+| Machine     | Tailscale IP    | Role         |
+|-------------|-----------------|--------------|
+| core-hub-01 | 100.75.180.124  | This VPS     |
 
 ### Docker Network
 ```
@@ -129,6 +142,13 @@ Allowed:
 - 22/tcp
 - 80/tcp
 - 443/tcp
+- 41641/udp (Tailscale)
+- 445/tcp on tailscale0 (Samba — Tailscale only)
+- 139/tcp on tailscale0 (Samba — Tailscale only)
+
+Denied (public):
+- 445/tcp (Samba blocked from internet)
+- 139/tcp (NetBIOS blocked from internet)
 
 ### 5.3 Fail2Ban
 Active jails:
@@ -190,6 +210,20 @@ and redirected to the login page before reaching the VPS.
 ### RedisInsight
 - Access: 127.0.0.1:5540 (SSH tunnel required from local)
 
+### Tailscale
+- Machine name: `core-hub-01`
+- Tailscale IP: `100.75.180.124`
+- Tailnet: zenosumo@
+- Auto-starts via systemd (`tailscaled.service`)
+
+### Samba
+- Share: `share` → `/opt` (covers both `/opt/zenaflow` and `/opt/core`)
+- Access: Tailscale only (`hosts allow = 100.64.0.0/10`)
+- User: `zenaflow` (system user, no shell login)
+- File operations run as: `root` (force user)
+- Config: `/etc/samba/smb.conf`
+- Service: `smbd` (nmbd disabled — not needed for macOS)
+
 ---
 
 ## 7. EXPOSURE SURFACE
@@ -206,6 +240,9 @@ Internal only (never exposed):
 - Hermes dashboard direct (9119) — proxied via Caddy + Cloudflare Access
 - pgAdmin (8889)
 - RedisInsight (5540)
+
+Tailscale-only (not reachable from public internet):
+- Samba (445/139) — file share at `smb://core-hub-01/share`
 
 ---
 
@@ -233,6 +270,33 @@ tail -f /var/log/caddy/workflow_access.log
 ufw status verbose
 ufw allow XX
 ufw delete allow XX
+```
+
+### Tailscale
+```bash
+# Status and peer list
+tailscale status
+
+# Check Tailscale IP
+tailscale ip -4
+
+# Restart if needed
+sudo systemctl restart tailscaled
+```
+
+### Samba
+```bash
+# Check service
+sudo systemctl status smbd
+
+# Verify listening on Tailscale range
+sudo ss -tlnp | grep -E ':(445|139)'
+
+# Reload config after changes
+sudo systemctl restart smbd
+
+# Reset Samba password
+sudo smbpasswd zenaflow
 ```
 
 ### Fail2Ban
@@ -289,3 +353,5 @@ systemctl stop fail2ban
 - Internal-only DBs and services
 - Hermes Agent running with Telegram + dashboard
 - Dashboard protected by Cloudflare Zero Trust Access
+- Tailscale mesh VPN for secure private access
+- Samba file share (`smb://core-hub-01/share`) — Tailscale-only, macOS Finder compatible

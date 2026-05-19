@@ -1,4 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"^#|^[A-Z_]+=\\\\s*$|^[A-Z_]+=$\" /opt/zenaflow/.env.sample)",
+      "Read(//home/appdev/.claude/**)",
+      "Bash(python3 -m json.tool)",
+      "Bash(tee -a /opt/zenaflow/.env.sample)",
+      "Bash(sudo ln -s /opt/zenaflow/.env /opt/core/hermes_data/.env)",
+      "Bash(docker compose *)"
+    ],
+    "additionalDirectories": [
+      "/opt/core"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
