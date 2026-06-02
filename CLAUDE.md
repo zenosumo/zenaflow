@@ -133,6 +133,8 @@ Environment loading (scripts/env.sh) sets up fnm (Fast Node Manager) path.
 **CRITICAL: Always run docker compose commands from `/opt/core`, NOT `/opt/zenaflow/docker`.**
 Running from `/opt/zenaflow/docker` creates a separate project context and causes container name conflicts.
 
+**CRITICAL: When editing `docker-compose.yml` directly (Read/Edit/Write tools), always use the real path `/opt/zenaflow/docker/docker-compose.yml`, NOT `/opt/core/docker-compose.yml` (which is a symlink and will fail).**
+
 ```bash
 # Start all services
 cd /opt/core && docker compose up -d
@@ -241,7 +243,7 @@ cat backup.sql | docker exec -i postgres psql -U n8n -d zenaflow
 ```bash
 # Preferred editor: micro
 micro /etc/caddy/Caddyfile
-micro /opt/core/docker-compose.yml
+micro /opt/zenaflow/docker/docker-compose.yml
 ```
 
 ## Data Persistence

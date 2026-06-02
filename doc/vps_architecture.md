@@ -62,7 +62,13 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
    qdrant_storage/
    pgadmin_data/
    pgadmin_config/servers.json
-   hermes_data/                  ← Hermes agent state (memories, skills, sessions)
+   hermes_data/                  ← Hermes agent state (profiles, memories, skills, sessions)
+      profiles/moran/            ← Moran profile; Honcho memory config is profile-local here
+   open_webui_data/              ← Open WebUI persistent data (users, chats, settings)
+   honcho/                       ← self-hosted Honcho memory stack for Hermes profile `moran`
+      docker-compose.yml         ← separate Compose project (`honcho`), not part of `/opt/core/docker-compose.yml`
+      .env                       ← Honcho LLM provider config/secrets (root-only)
+      database/init.sql          ← pgvector init SQL for Honcho Postgres
 
 /opt/vault                       ← second brain vault (Phase 6, not yet deployed)
 ```
@@ -81,11 +87,17 @@ Public ports:
 |-------------|-----------------|--------------|
 | core-hub-01 | 100.75.180.124  | This VPS     |
 
-### Docker Network
+### Docker Networks
 ```
-core_core_net (bridge)
-Subnet: 172.18.0.0/16
+core_core_net    (bridge)  Main application network, subnet 172.18.0.0/16
+hermes_honcho    (bridge)  Private Hermes ↔ Honcho API network; no host-published ports
+honcho_internal  (bridge)  Honcho API/worker ↔ Honcho Postgres/Redis only
 ```
+
+Honcho isolation rule:
+- `honcho-api` is reachable from `hermes` only via `hermes_honcho` at `http://honcho-api:8000`.
+- `honcho-postgres` and `honcho-redis` are only on `honcho_internal`.
+- Honcho exposes no host port; `127.0.0.1:8000` should refuse connections from the VPS host.
 
 ### Container IP Map
 | Service      | IP          | Host Port (bound to 127.0.0.1) |
@@ -97,6 +109,10 @@ Subnet: 172.18.0.0/16
 | redisinsight | 172.18.0.4  | 5540                          |
 | pgadmin      | 172.18.0.6  | 8889                          |
 | hermes       | 172.18.0.8  | 8642 (API), 9119 (dashboard)  |
+| open-webui   | dynamic     | 3001                          |
+| honcho-api   | dynamic     | — (Docker-network only)        |
+| honcho-postgres | internal | —                              |
+| honcho-redis | internal    | —                              |
 
 ---
 
@@ -105,9 +121,10 @@ Subnet: 172.18.0.0/16
 Config: `/opt/zenaflow/caddy/Caddyfile` (source of truth)
 
 ```
-workflow.zenaflow.com → 127.0.0.1:5678   (n8n editor)
-webhook.zenaflow.com  → 127.0.0.1:5678   (n8n webhooks)
-argo.zenaflow.com     → 127.0.0.1:9119   (Hermes dashboard)
+workflow.zenaflow.com   → 127.0.0.1:5678   (n8n editor)
+webhook.zenaflow.com    → 127.0.0.1:5678   (n8n webhooks)
+argo.zenaflow.com       → 127.0.0.1:3001   (Open WebUI — Cloudflare Zero Trust protected)
+dashboard.zenaflow.com  → 127.0.0.1:9119   (Hermes dashboard)
 ```
 
 All domains:
@@ -120,6 +137,7 @@ Log files:
 /var/log/caddy/workflow_access.log
 /var/log/caddy/webhook_access.log
 /var/log/caddy/argo_access.log
+/var/log/caddy/dashboard_access.log
 ```
 
 ---
@@ -166,7 +184,7 @@ Logpaths:
 `argo.zenaflow.com` is protected by Cloudflare Access in addition to Caddy.
 
 - Team: `zenaflow.cloudflareaccess.com`
-- Application: `Hermes Dashboard`
+- Application: `Open WebUI` (argo.zenaflow.com)
 - Policy: Allow — email allowlist (zenotempo@gmail.com)
 - Session duration: 24 hours
 - Auth method: one-time email code (OTP)
@@ -183,12 +201,40 @@ and redirected to the login page before reaching the VPS.
 - Data: /opt/core/n8n_data
 - DB: PostgreSQL `n8n` database
 
+### Open WebUI
+- URL: argo.zenaflow.com (Cloudflare Zero Trust protected)
+- Connects to Hermes API at `http://hermes:8642/v1` (OpenAI-compatible)
+- Port: 127.0.0.1:3001
+- Data: /opt/core/open_webui_data
+- Image: ghcr.io/open-webui/open-webui:main
+
 ### Hermes Agent
-- Dashboard: argo.zenaflow.com (Cloudflare Access protected)
+- Dashboard: dashboard.zenaflow.com
 - Gateway API: 127.0.0.1:8642 (internal only)
 - Telegram: connected (bot token in hermes_data/.env)
 - Data: /opt/core/hermes_data
 - Image: nousresearch/hermes-agent:latest
+- Runtime UID/GID inside container: 10000:10000 (`hermes` user)
+- Named profiles live under `/opt/core/hermes_data/profiles/`
+
+#### Hermes profile: moran
+- Profile path: `/opt/core/hermes_data/profiles/moran`
+- Personality file: `/opt/core/hermes_data/profiles/moran/SOUL.md`
+- Memory provider: Honcho (`memory.provider: honcho`)
+- Honcho profile-local config: `/opt/core/hermes_data/profiles/moran/honcho.json`
+- Honcho identity: workspace `hermes-moran`, user peer `kris`, AI peer `moran`
+- Honcho API URL from Hermes: `http://honcho-api:8000`
+
+### Honcho Memory Stack (Moran)
+- Purpose: self-hosted Honcho memory backend for Hermes profile `moran`
+- Compose project: `honcho`
+- Compose file: `/opt/core/honcho/docker-compose.yml`
+- Services: `honcho-api`, `honcho-deriver`, `honcho-postgres`, `honcho-redis`
+- LLM backend: OpenAI-compatible opencode-zen endpoint (`claude-sonnet-4-6`) via `/opt/core/honcho/.env`
+- Message embeddings: disabled (`EMBED_MESSAGES=false`) until a dedicated embeddings provider is configured
+- API exposure: no published host port; accessible only from `hermes` over Docker network `hermes_honcho`
+- Database: dedicated Honcho Postgres with pgvector, volume `honcho_pgdata`
+- Cache: dedicated Honcho Redis, volume `honcho_redis-data`
 
 ### PostgreSQL
 - Two databases: `n8n` (system) and `zenaflow` (application)
@@ -237,7 +283,11 @@ Internal only (never exposed):
 - Redis (6379)
 - Qdrant (6333/6334)
 - Hermes API (8642)
-- Hermes dashboard direct (9119) — proxied via Caddy + Cloudflare Access
+- Hermes dashboard direct (9119) — proxied via Caddy at dashboard.zenaflow.com
+- Open WebUI (3001) — proxied via Caddy + Cloudflare Zero Trust at argo.zenaflow.com
+- Honcho API (8000) — Docker-network only, not bound to host localhost
+- Honcho Postgres (5432) — `honcho_internal` Docker network only
+- Honcho Redis (6379) — `honcho_internal` Docker network only
 - pgAdmin (8889)
 - RedisInsight (5540)
 
@@ -250,12 +300,35 @@ Tailscale-only (not reachable from public internet):
 
 ### Docker Stack
 ```bash
-# IMPORTANT: always run from /opt/core
+# IMPORTANT: core stack: always run from /opt/core
 cd /opt/core && docker compose up -d
 cd /opt/core && docker compose ps
 cd /opt/core && docker compose logs -f [service]
 cd /opt/core && docker compose restart [service]
 cd /opt/core && docker compose down
+
+# Honcho memory stack for moran: separate Compose project
+cd /opt/core/honcho && docker compose up -d
+cd /opt/core/honcho && docker compose ps
+cd /opt/core/honcho && docker compose logs -f api deriver
+cd /opt/core/honcho && docker compose restart api deriver
+```
+
+### Hermes / Moran / Honcho
+```bash
+# Check Moran Honcho config and memory status
+sudo docker exec -u 10000:10000 -e HERMES_HOME=/opt/data/profiles/moran hermes /opt/hermes/.venv/bin/hermes memory status
+sudo docker exec -u 10000:10000 -e HERMES_HOME=/opt/data/profiles/moran hermes /opt/hermes/.venv/bin/hermes honcho status
+
+# Verify Honcho is not host-exposed; this should fail from the VPS host
+curl --max-time 2 http://127.0.0.1:8000/health
+
+# Verify Hermes can reach Honcho over the private Docker network; this should return {"status":"ok"}
+sudo docker exec -u 10000:10000 hermes curl -sS --max-time 5 http://honcho-api:8000/health
+
+# Restart the Moran gateway inside the Hermes container after config/SOUL changes
+sudo docker exec hermes pkill -f "hermes -p moran gateway run" || true
+sudo docker exec -u hermes -d hermes /opt/hermes/.venv/bin/hermes -p moran gateway run
 ```
 
 ### Caddy
@@ -347,11 +420,14 @@ systemctl stop fail2ban
 
 ## 10. SUMMARY
 - Secure, minimal, production-ready stack
-- Docker isolated services on core_core_net (172.18.0.0/16)
+- Main Docker services isolated on core_core_net (172.18.0.0/16)
+- Honcho memory stack isolated in its own Compose project and private Docker networks
 - Key-only SSH, UFW active, Fail2Ban active
 - Caddy handles HTTPS with Cloudflare trusted proxy
 - Internal-only DBs and services
-- Hermes Agent running with Telegram + dashboard
-- Dashboard protected by Cloudflare Zero Trust Access
+- Hermes Agent running with Telegram + dashboard (dashboard.zenaflow.com)
+- Open WebUI chat interface at argo.zenaflow.com, backed by Hermes OpenAI-compatible API
+- Moran Hermes profile uses self-hosted Honcho memory: workspace `hermes-moran`, peer `kris`, AI peer `moran`
+- argo.zenaflow.com protected by Cloudflare Zero Trust Access
 - Tailscale mesh VPN for secure private access
 - Samba file share (`smb://core-hub-01/share`) — Tailscale-only, macOS Finder compatible
