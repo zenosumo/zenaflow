@@ -13,13 +13,19 @@ Dify will be used as an AI-native workflow/app platform. It will later connect t
 ### Exposure and routing
 
 - Public hostname: `dify.zenaflow.com`.
-- User will configure Cloudflare Zero Trust for `dify.zenaflow.com` in parallel with the install.
+- Cloudflare Zero Trust is already in place for `dify.zenaflow.com`.
 - Caddy will reverse proxy `dify.zenaflow.com` to Dify.
 - Dify web/proxy entrypoint host binding:
   - `127.0.0.1:8088`
 - Do not bind Dify directly to `0.0.0.0`.
 - Do not use ports `3002` through `3020`; reserve that range for future chat/WebUI tools.
 - Only the Dify web/proxy entrypoint should be host-published. Internal services must not expose host ports.
+- Use the existing `/opt/core/Caddyfile` directly for the initial Dify route.
+- Validate the current Caddyfile before editing, validate again after editing, and reload Caddy only after validation passes.
+- Use a dedicated Dify Caddy access log matching the existing per-service pattern:
+  - `/var/log/caddy/dify_access.log`
+- If the official Dify bundle includes its own nginx/proxy service, keep it and point Caddy to that single Dify entrypoint.
+- Keep Dify's default internal ports from the official bundle; only remap the host-published entrypoint to `127.0.0.1:8088`.
 
 ### Compose/project layout
 
@@ -40,15 +46,30 @@ Suggested layout:
     ...
 ```
 
+Implementation workflow:
+
+- Install only Dify now; leave RAGFlow untouched.
+- Inspect Dify's current official Docker Compose bundle/docs live before preparing install files.
+- Use `/tmp/dify-prepare` as a temporary staging/inspection directory.
+- If `/opt/core/dify` already exists and is non-empty, make a timestamped backup before modifying it.
+- Prepare files/config first, summarize the intended changes, and ask for approval before starting containers.
+- Do a live VPS resource/headroom check before install/start: CPU/load, memory, disk, Docker status/stats, existing service health, and whether `127.0.0.1:8088` is free.
+- Commit after each meaningful docs/config phase. Keep Dify marked planned/prepared in docs until it is actually running and verified.
+- Set `COMPOSE_PROJECT_NAME=dify` for predictable Compose naming.
+- Prefer bind-mounted persistent directories under `/opt/core/dify/volumes/` where practical; use Docker named volumes only where the official bundle strongly expects them.
+- Use `restart: unless-stopped` for Dify services unless the official bundle already uses an equivalent policy.
+
 ### Data services and storage
 
 - Use Dify-owned dedicated services from the official bundle:
   - dedicated Dify Postgres
   - dedicated Dify Redis
   - dedicated Dify vector database/container
+- If the official bundle offers multiple vector backends, use Dify's official default/recommended dedicated vector backend rather than forcing Zenaflow's existing Qdrant.
 - Do not share existing Zenaflow Postgres, Redis, or Qdrant.
 - Use local filesystem storage under `/opt/core/dify/` for the initial install.
 - Do not configure S3/R2/MinIO/object storage initially.
+- Set an initial Dify upload/file-size limit of 100 MB if Dify supports it cleanly; keep the official lower default if it is already lower.
 
 ### Networks
 
@@ -61,7 +82,8 @@ Suggested layout:
 
 - Leave SMTP/email unconfigured initially unless Dify hard-requires it.
 - Disable public self-registration / use admin-only accounts initially.
-- This can be enabled later if desired, preferably still behind Cloudflare Zero Trust.
+- The user will create the initial Dify admin account through the UI after the service is reachable. Do not create or handle admin credentials in chat/terminal logs.
+- Public self-registration can be enabled later if desired, preferably still behind Cloudflare Zero Trust.
 
 ### Dify secrets and .env files
 
@@ -73,6 +95,8 @@ Suggested layout:
 - Do not reuse existing Zenaflow, n8n, Hermes, or Open WebUI secrets for Dify.
 - Generate new Dify-only secrets for Dify's `SECRET_KEY`, DB password, Redis password, sandbox/plugin secrets, and other required secret values.
 - Do not paste secrets into docs, chat, git diffs, or logs.
+- Keep `/opt/core/dify/.env` runtime-only and out of git; do not copy it into `/opt/zenaflow`.
+- Skip creating a local sanitized Dify env example for now; rely on upstream examples plus this plan.
 
 Robot provider reference in `/opt/core/dify/.env`:
 
@@ -118,7 +142,7 @@ These items should be completed after containers are up and before considering t
    - plugin daemon
 4. Confirm Caddy proxies:
    - `dify.zenaflow.com` -> `127.0.0.1:8088`
-5. Confirm Cloudflare Zero Trust protects `dify.zenaflow.com` before treating the app as internet-facing.
+5. Confirm Cloudflare Zero Trust protects `dify.zenaflow.com` before treating the app as internet-facing; user says Zero Trust is already in place.
 6. Confirm Dify data persists under `/opt/core/dify/` after restart.
 7. Confirm Dify services can reach Hermes `robot` over Docker networking where needed:
    - `http://hermes:8648/v1`
@@ -131,7 +155,7 @@ These items should be completed after containers are up and before considering t
 3. Leave SMTP/email disabled/unconfigured unless Dify requires it for the chosen account flow.
 4. Review workspace/app visibility defaults.
 5. Review any telemetry/analytics settings exposed by Dify and disable if desired.
-6. Review file upload limits and storage location.
+6. Review file upload limits and storage location; target initial cap is 100 MB if supported cleanly.
 7. Review sandbox/plugin settings and make sure no public ports are exposed.
 
 ### Model provider setup after Dify is healthy
@@ -175,4 +199,12 @@ Optionally update or create operational notes for backup/restore and upgrade pro
 
 ## Open questions before install
 
-The remaining planning questions should be resolved before installation starts.
+Most deployment-shape decisions are resolved. Remaining questions should be limited to items discovered from the live official Dify bundle or VPS resource check, such as:
+
+1. Which exact official Dify stable release/tag is current at preparation time?
+2. Which service in that release is the correct single web/proxy entrypoint for `127.0.0.1:8088`?
+3. Which Dify service(s) in that release must join `core_core_net` to reach Hermes `robot`?
+4. What exact env variable controls signup/self-registration and the 100 MB upload limit in that release?
+5. Are VPS resources sufficient, or are service limits/swap/postponement needed before start?
+
+Do not re-ask decisions already recorded above unless the official Dify bundle conflicts with them.
