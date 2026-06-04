@@ -1,6 +1,6 @@
 # Dify Install Plan
 
-Status: planning. Dify is not installed yet.
+Status: prepared. Runtime files are staged under `/opt/core/dify`; containers are not yet verified until the install run completes.
 
 ## Goal
 

@@ -80,9 +80,9 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
       docker-compose.yml         ← separate Compose project (`honcho`), not part of `/opt/core/docker-compose.yml`
       .env                       ← Honcho LLM provider config/secrets (root-only)
       database/init.sql          ← pgvector init SQL for Honcho Postgres
-   dify/                         ← planned separate Dify Compose project (not installed yet)
-      docker-compose.yml         ← planned Dify-specific Compose file based on official bundle
-      .env                       ← planned sparse Dify-only config/secrets; do not mix into /opt/core/.env
+   dify/                         ← Dify separate Compose project runtime directory
+      docker-compose.yaml        ← Dify-specific Compose file based on official 1.14.2 bundle
+      .env                       ← sparse Dify-only config/secrets; runtime-only, do not commit
 
 /opt/memento                     ← second-brain Obsidian vault mounted into Hermes as `/memento`
 ```
@@ -93,7 +93,7 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
 - Separate Compose projects should keep their own sparse app-local `.env` file beside their Compose file, containing only that app's required config/secrets.
 - Current/planned examples:
   - Honcho: `/opt/core/honcho/.env`
-  - Dify: `/opt/core/dify/.env` (planned; Dify is not installed yet)
+  - Dify: `/opt/core/dify/.env` (runtime-only Dify secrets/config; not committed)
 - Do not copy unrelated secrets between `.env` files. If a cross-service credential is needed, document the source-of-truth path and variable name instead of duplicating the secret unless deliberately choosing a copied-secret workflow.
 - Never paste secret values into docs, chat, git diffs, or logs.
 
@@ -241,6 +241,23 @@ and redirected to the login page before reaching the VPS.
 - Hermes config: `/opt/core/hermes_data/config.yaml` under `mcp_servers.n8n`
 - Verified tools: 24 n8n MCP tools, including workflow list/get/create/update/delete, validation, template search, executions, and health check
 
+
+### Dify
+
+- Application: Dify (`dify.zenaflow.com`)
+- Exposure: Caddy + Cloudflare Zero Trust; Caddy proxies to `127.0.0.1:8088`
+- Runtime directory: `/opt/core/dify/`
+- Compose file: `/opt/core/dify/docker-compose.yaml` based on official Dify `1.14.2` Docker bundle
+- Compose project: `dify`
+- Host-published Dify port: only `127.0.0.1:8088 -> nginx:80`
+- Dedicated Caddy access log: `/var/log/caddy/dify_access.log`
+- Dedicated Dify-owned services: Postgres, Redis, Weaviate vector DB, sandbox, plugin daemon, workers
+- Dify internal proxy: keep official Dify `nginx` service; outer VPS Caddy proxies to it
+- Persistent/runtime data: bind-mounted under `/opt/core/dify/volumes/` where supported by the official bundle
+- Secrets/config: `/opt/core/dify/.env` (runtime-only, mode `0600`, not committed)
+- Robot provider setup: configure manually in Dify UI after first boot using OpenAI-compatible endpoint `http://hermes:8648/v1`, model `robot`, API key from `/opt/core/hermes_data/profiles/robot/.env` (`API_SERVER_KEY`)
+- RAGFlow is not installed as part of the Dify stage.
+
 ### Open WebUI
 - URL: argo.zenaflow.com (Cloudflare Zero Trust protected)
 - Connects to Hermes API at `http://hermes:8642/v1` (OpenAI-compatible)
@@ -269,7 +286,7 @@ and redirected to the login page before reaching the VPS.
 - Argo has n8n MCP configured at `mcp_servers.n8n` and can manage/query n8n workflows through `n8n-mcp`
 
 #### Hermes profile: robot
-- Purpose: sterile OpenAI-compatible model backend reserved for future Dify/RAGFlow integration; Dify and RAGFlow are not installed yet.
+- Purpose: sterile OpenAI-compatible model backend reserved for Dify/RAGFlow integration; Dify uses it only after provider setup in the Dify UI.
 - Profile path: `/opt/core/hermes_data/profiles/robot`
 - Personality file: `/opt/core/hermes_data/profiles/robot/SOUL.md`
 - API server: `http://hermes:8648/v1` from containers on `core_core_net`; `http://127.0.0.1:8648/v1` from inside the Hermes container/host context where reachable
