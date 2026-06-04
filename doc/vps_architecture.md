@@ -80,9 +80,22 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
       docker-compose.yml         ← separate Compose project (`honcho`), not part of `/opt/core/docker-compose.yml`
       .env                       ← Honcho LLM provider config/secrets (root-only)
       database/init.sql          ← pgvector init SQL for Honcho Postgres
+   dify/                         ← planned separate Dify Compose project (not installed yet)
+      docker-compose.yml         ← planned Dify-specific Compose file based on official bundle
+      .env                       ← planned sparse Dify-only config/secrets; do not mix into /opt/core/.env
 
 /opt/memento                     ← second-brain Obsidian vault mounted into Hermes as `/memento`
 ```
+
+### Sparse `.env` file convention
+
+- `/opt/core/.env` is for the existing core Compose stack and shared/core service secrets such as n8n, core Postgres, and n8n MCP.
+- Separate Compose projects should keep their own sparse app-local `.env` file beside their Compose file, containing only that app's required config/secrets.
+- Current/planned examples:
+  - Honcho: `/opt/core/honcho/.env`
+  - Dify: `/opt/core/dify/.env` (planned; Dify is not installed yet)
+- Do not copy unrelated secrets between `.env` files. If a cross-service credential is needed, document the source-of-truth path and variable name instead of duplicating the secret unless deliberately choosing a copied-secret workflow.
+- Never paste secret values into docs, chat, git diffs, or logs.
 
 ---
 
