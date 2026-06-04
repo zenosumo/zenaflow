@@ -266,3 +266,54 @@ Most deployment-shape decisions are resolved. Remaining questions should be limi
 5. Are VPS resources sufficient, or are service limits/swap/postponement needed before start?
 
 Do not re-ask decisions already recorded above unless the official Dify bundle conflicts with them.
+
+
+---
+
+## Incident note — 2026-06-05
+
+### What happened
+
+After Dify was installed and started, the VPS became critically overloaded:
+
+- Load average reached 190+ (4 vCPU machine)
+- RAM: 7.6 GB total, ~7.2 GB used, no swap configured
+- SSH banner exchange was timing out; the machine was effectively unreachable
+
+Root causes identified:
+
+1. No swap — with all 26 containers running and no swap buffer, any memory spike caused
+   the OOM killer to fire, creating a load spiral.
+2. Runaway Cloudflare MCP node processes — 10+ stray node processes each consuming
+   1-2% CPU and 1-2% RAM continuously (~300 MB total).
+3. Dify adds ~1.5 GB RAM across its 12 containers on top of an already tight stack.
+
+### What was done
+
+1. Hard shutdown via Hetzner console (SSH was unresponsive).
+2. After reboot: stopped all 26 containers with docker stop + docker rm.
+3. Installed linux-modules-extra and zram-tools.
+4. Configured 4 GB zram device with lz4 compression, priority 100.
+   - Effective swap capacity: ~10 GB (at ~2.5:1 compression ratio)
+   - Zero disk I/O overhead
+   - Persistent via zramswap.service (enabled, starts on boot)
+5. Tuned kernel: vm.swappiness=100, vm.vfs_cache_pressure=500 (persisted in /etc/sysctl.conf).
+6. Set all container restart policies to no to prevent auto-restart until deliberately brought up.
+
+### Current state (2026-06-05)
+
+- All containers: Exited, restart=no (will not auto-start on next reboot)
+- zram: /dev/zram0 4 GB lz4 active, 0 used — NO reboot needed, already live
+- RAM available (no containers): ~6.9 GB free
+- Load: 0.39
+
+### Remaining work before bringing containers back up
+
+1. Fix Caddy TLS block for dify.zenaflow.com:
+   - Current block attempts public ACME (Let's Encrypt http-01/tls-alpn-01)
+   - Both challenges fail because Cloudflare Access intercepts the domain
+   - Fix: use same TLS strategy as other working sites (likely Cloudflare Origin cert or tls internal)
+2. Decide which containers to bring up and in what order.
+3. Consider whether pgadmin and redisinsight need to run 24/7 (saves ~350 MB RAM).
+4. Consider upgrading Hetzner plan for more RAM if zram proves insufficient under full load.
+
