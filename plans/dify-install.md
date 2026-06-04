@@ -197,6 +197,31 @@ After Dify is actually installed and verified, update:
 
 Optionally update or create operational notes for backup/restore and upgrade procedure.
 
+## Future RAGFlow note
+
+RAGFlow is explicitly out of scope for this installation. Install only Dify in this stage.
+
+When planning RAGFlow later, reuse the same default deployment preferences from this Dify plan unless RAGFlow has a specific reason to differ:
+
+- separate Compose project under `/opt/core/ragflow/`
+- dedicated app-local `.env`, runtime-only and out of git
+- generated app-only secrets, no reused n8n/Hermes/Open WebUI secrets
+- dedicated app-owned database/cache/vector/search services instead of sharing core Zenaflow services, unless the official RAGFlow bundle requires otherwise
+- localhost-only published web entrypoint behind Caddy and Cloudflare Zero Trust
+- no direct `0.0.0.0` exposure
+- existing `/opt/core/Caddyfile` route with validate-before/after flow
+- dedicated Caddy access log
+- official stable Docker Compose bundle as base
+- pin official stable image tags
+- staging directory before writing final runtime files
+- backup existing runtime dir if non-empty
+- prepare files/config first, summarize diff, ask before starting containers
+- live resource/headroom check before start
+- commit after each meaningful docs/config phase
+- keep future docs marked planned/prepared until verified
+
+For RAGFlow, ask the user only for decisions not already covered by this plan or where RAGFlow's official bundle creates a new tradeoff.
+
 ## Open questions before install
 
 Most deployment-shape decisions are resolved. Remaining questions should be limited to items discovered from the live official Dify bundle or VPS resource check, such as:
