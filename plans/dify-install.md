@@ -1,6 +1,6 @@
 # Dify Install Plan
 
-Status: prepared. Runtime files are staged under `/opt/core/dify`; containers are not yet verified until the install run completes.
+Status: installed and verified. Dify 1.14.2 is running under `/opt/core/dify` behind Caddy at `dify.zenaflow.com`.
 
 ## Goal
 
@@ -196,6 +196,39 @@ After Dify is actually installed and verified, update:
   - document post-install robot provider wiring if completed
 
 Optionally update or create operational notes for backup/restore and upgrade procedure.
+
+
+## Installation verification
+
+Verified after start:
+
+- Caddy route installed live in `/etc/caddy/Caddyfile` and reloaded successfully.
+- Dedicated Dify Caddy log exists at `/var/log/caddy/dify_access.log` owned by `caddy:caddy` with mode `0600`.
+- Dify Compose project `dify` is running from `/opt/core/dify`.
+- Host-published Dify port is only `127.0.0.1:8088 -> nginx:80`.
+- `plugin_daemon` has no host-published debug/public port.
+- `db_postgres`, `redis`, `sandbox`, and `api` health checks reached healthy state.
+- Local web check succeeded: `http://127.0.0.1:8088/` returns the Dify web app after redirect.
+- Setup API check succeeded: `http://127.0.0.1:8088/console/api/setup` returned `{"step":"not_started","setup_at":null}`.
+- From inside the Dify `api` container, `http://hermes:8648/v1/models` reached Hermes `robot` and returned model `robot` when using the robot API key.
+- Public `https://dify.zenaflow.com` is behind Cloudflare Access / Zero Trust.
+
+Install notes:
+
+- Initial image pull failed once because `/` reached about 95% usage and Docker reported `no space left on device`.
+- Reclaimed space with `docker image prune -af` and `docker builder prune -af`; no Docker volumes were pruned.
+- Disk improved to about `35G/75G` used (`49%`) before the successful second start.
+- The VPS load average spiked during image extraction/startup; after startup, Dify containers were running but memory remained tight. Keep an eye on memory/load during first UI use.
+
+Remaining manual setup:
+
+1. Visit `https://dify.zenaflow.com` through Cloudflare Zero Trust.
+2. Create the initial Dify admin account yourself in the UI.
+3. Configure the OpenAI-compatible model provider for Hermes `robot` in the Dify UI:
+   - Base URL: `http://hermes:8648/v1`
+   - Model: `robot`
+   - API key source: `/opt/core/hermes_data/profiles/robot/.env`, variable `API_SERVER_KEY`
+4. Do not paste the robot API key into docs/chat.
 
 ## Future RAGFlow note
 

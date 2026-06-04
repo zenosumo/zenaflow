@@ -245,6 +245,7 @@ and redirected to the login page before reaching the VPS.
 ### Dify
 
 - Application: Dify (`dify.zenaflow.com`)
+- Current state: installed and verified; initial admin account still to be created by the user in the Dify UI
 - Exposure: Caddy + Cloudflare Zero Trust; Caddy proxies to `127.0.0.1:8088`
 - Runtime directory: `/opt/core/dify/`
 - Compose file: `/opt/core/dify/docker-compose.yaml` based on official Dify `1.14.2` Docker bundle
@@ -255,6 +256,7 @@ and redirected to the login page before reaching the VPS.
 - Dify internal proxy: keep official Dify `nginx` service; outer VPS Caddy proxies to it
 - Persistent/runtime data: bind-mounted under `/opt/core/dify/volumes/` where supported by the official bundle
 - Secrets/config: `/opt/core/dify/.env` (runtime-only, mode `0600`, not committed)
+- Setup API after install: `/console/api/setup` returned `not_started`, so the first-user setup remains pending in the UI
 - Robot provider setup: configure manually in Dify UI after first boot using OpenAI-compatible endpoint `http://hermes:8648/v1`, model `robot`, API key from `/opt/core/hermes_data/profiles/robot/.env` (`API_SERVER_KEY`)
 - RAGFlow is not installed as part of the Dify stage.
 
