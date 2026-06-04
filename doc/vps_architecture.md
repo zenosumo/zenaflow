@@ -2,9 +2,17 @@
 
 ## 1. ACCESS LAYER
 ### 1.1 SSH (Primary Entry)
+Preferred operational login:
+```
+ssh appdev@zenaflow
+```
+
+Legacy/root DNS entry, when needed for recovery work:
 ```
 ssh root@core.zenaflow.com
 ```
+
+Default noninteractive working directory for `appdev` is `/home/appdev`. Use `/opt/core` for live Docker/runtime operations and `/opt/zenaflow` for architecture docs, plans, and repo-tracked configuration.
 
 ### 1.2 SCP (Download Docker Compose)
 ```
@@ -52,10 +60,10 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
    doc/
    plans/
 
-/opt/core                        ← runtime data (not in git)
-   docker-compose.yml            → symlink → /opt/zenaflow/docker/docker-compose.yml
+/opt/core                        ← live runtime data and Docker Compose stack
+   docker-compose.yml            ← live Compose file for core services
    Caddyfile                     → symlink → /opt/zenaflow/caddy/Caddyfile
-   .env                          ← POSTGRES_PASSWORD and other secrets
+   .env                          ← POSTGRES_PASSWORD, N8N_API_KEY, N8N_MCP_AUTH_TOKEN, and other secrets
    n8n_data/
    postgres_data/
    redis_data/
@@ -63,14 +71,17 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
    pgadmin_data/
    pgadmin_config/servers.json
    hermes_data/                  ← Hermes agent state (profiles, memories, skills, sessions)
+      .env                       ← default Hermes/Argo profile env; API model name is `Argo`
+      config.yaml                ← default Hermes/Argo config; includes n8n MCP server config
       profiles/moran/            ← Moran profile; Honcho memory config is profile-local here
+      profiles/robot/            ← Sterile Hermes API profile reserved for future Dify/RAGFlow provider use
    open_webui_data/              ← Open WebUI persistent data (users, chats, settings)
    honcho/                       ← self-hosted Honcho memory stack for Hermes profile `moran`
       docker-compose.yml         ← separate Compose project (`honcho`), not part of `/opt/core/docker-compose.yml`
       .env                       ← Honcho LLM provider config/secrets (root-only)
       database/init.sql          ← pgvector init SQL for Honcho Postgres
 
-/opt/vault                       ← second brain vault (Phase 6, not yet deployed)
+/opt/memento                     ← second-brain Obsidian vault mounted into Hermes as `/memento`
 ```
 
 ---
@@ -108,8 +119,9 @@ Honcho isolation rule:
 | qdrant       | 172.18.0.7  | —                             |
 | redisinsight | 172.18.0.4  | 5540                          |
 | pgadmin      | 172.18.0.6  | 8889                          |
-| hermes       | 172.18.0.8  | 8642 (API), 9119 (dashboard)  |
+| hermes       | 172.18.0.8  | 8642 (Argo API), 8643-8648 (profile APIs), 9119 (dashboard) |
 | open-webui   | dynamic     | 3001                          |
+| n8n-mcp      | dynamic     | — (Docker-network only, port 3000 in `core_core_net`) |
 | honcho-api   | dynamic     | — (Docker-network only)        |
 | honcho-postgres | internal | —                              |
 | honcho-redis | internal    | —                              |
@@ -200,6 +212,21 @@ and redirected to the login page before reaching the VPS.
 - URL: workflow.zenaflow.com (editor), webhook.zenaflow.com (webhooks)
 - Data: /opt/core/n8n_data
 - DB: PostgreSQL `n8n` database
+- Public API: enabled; API key stored in `/opt/core/.env` as `N8N_API_KEY`
+- Current workflow inventory can be queried via n8n REST API or through Argo's n8n MCP tools
+
+### n8n MCP Server
+- Purpose: exposes n8n workflow-management tools to Argo via MCP
+- Container: `n8n-mcp`
+- Image: `ghcr.io/czlonkowski/n8n-mcp:latest`
+- Internal URL from Hermes: `http://n8n-mcp:3000/mcp`
+- Health endpoint: `http://n8n-mcp:3000/health`
+- Transport: HTTP / Streamable HTTP with Bearer auth
+- Auth token: `/opt/core/.env` variable `N8N_MCP_AUTH_TOKEN`; passed as `AUTH_TOKEN` and `MCP_AUTH_TOKEN`
+- n8n API key: `/opt/core/.env` variable `N8N_API_KEY`
+- Network: `core_core_net`; no public or localhost host port is exposed
+- Hermes config: `/opt/core/hermes_data/config.yaml` under `mcp_servers.n8n`
+- Verified tools: 24 n8n MCP tools, including workflow list/get/create/update/delete, validation, template search, executions, and health check
 
 ### Open WebUI
 - URL: argo.zenaflow.com (Cloudflare Zero Trust protected)
@@ -208,14 +235,36 @@ and redirected to the login page before reaching the VPS.
 - Data: /opt/core/open_webui_data
 - Image: ghcr.io/open-webui/open-webui:main
 
-### Hermes Agent
+### Hermes Agent / Argo
+- Default profile name in Open WebUI/API model list: `Argo`
 - Dashboard: dashboard.zenaflow.com
-- Gateway API: 127.0.0.1:8642 (internal only)
+- Gateway API: 127.0.0.1:8642 (internal only, OpenAI-compatible)
 - Telegram: connected (bot token in hermes_data/.env)
 - Data: /opt/core/hermes_data
 - Image: nousresearch/hermes-agent:latest
 - Runtime UID/GID inside container: 10000:10000 (`hermes` user)
+- Avoid running `docker exec hermes hermes` as root; prefer `docker exec -u 10000:10000 hermes ...` for read-only container operations
+- Main vault mount: `/opt/memento` on host → `/memento` inside container
 - Named profiles live under `/opt/core/hermes_data/profiles/`
+- Secondary API-server ports are assigned per profile to avoid conflicts with Argo on 8642:
+  - `clio`: 8643
+  - `hermione`: 8644
+  - `moran`: 8645
+  - `samira`: 8646
+  - `nadia`: 8647
+  - `robot`: 8648
+- Argo has n8n MCP configured at `mcp_servers.n8n` and can manage/query n8n workflows through `n8n-mcp`
+
+#### Hermes profile: robot
+- Purpose: sterile OpenAI-compatible model backend reserved for future Dify/RAGFlow integration; Dify and RAGFlow are not installed yet.
+- Profile path: `/opt/core/hermes_data/profiles/robot`
+- Personality file: `/opt/core/hermes_data/profiles/robot/SOUL.md`
+- API server: `http://hermes:8648/v1` from containers on `core_core_net`; `http://127.0.0.1:8648/v1` from inside the Hermes container/host context where reachable
+- API model name: `robot`
+- API key: `/opt/core/hermes_data/profiles/robot/.env` variable `API_SERVER_KEY` (do not paste into docs/chat)
+- Memory disabled: `memory.memory_enabled: false`, `memory.user_profile_enabled: false`
+- Toolsets and bundled skills disabled for the API profile; `platform_toolsets.api_server: []` keeps the profile model-only for external app calls
+- Gateway autostart includes `robot`; verify with `/opt/core/hermes_data/profiles/robot/gateway_state.json` and `/v1/models` before wiring new apps
 
 #### Hermes profile: moran
 - Profile path: `/opt/core/hermes_data/profiles/moran`
@@ -282,9 +331,11 @@ Internal only (never exposed):
 - PostgreSQL (5432)
 - Redis (6379)
 - Qdrant (6333/6334)
-- Hermes API (8642)
+- Hermes/Argo API (8642)
+- Secondary Hermes profile APIs (8643-8648)
 - Hermes dashboard direct (9119) — proxied via Caddy at dashboard.zenaflow.com
 - Open WebUI (3001) — proxied via Caddy + Cloudflare Zero Trust at argo.zenaflow.com
+- n8n-mcp (3000) — Docker-network only on `core_core_net`, no host port
 - Honcho API (8000) — Docker-network only, not bound to host localhost
 - Honcho Postgres (5432) — `honcho_internal` Docker network only
 - Honcho Redis (6379) — `honcho_internal` Docker network only
@@ -312,6 +363,20 @@ cd /opt/core/honcho && docker compose up -d
 cd /opt/core/honcho && docker compose ps
 cd /opt/core/honcho && docker compose logs -f api deriver
 cd /opt/core/honcho && docker compose restart api deriver
+```
+
+### Hermes / Argo / n8n MCP
+```bash
+# Check Argo API model name; should include id/root `Argo`
+# Use the live API key from /opt/core/.env; do not paste secrets into logs.
+cd /opt/core && curl -sS http://127.0.0.1:8642/v1/models  # add Authorization: Bearer <API_SERVER_KEY> from .env
+
+# Check n8n MCP container health from Hermes/core network
+docker exec hermes curl -sS --max-time 5 http://n8n-mcp:3000/health
+
+# Check Hermes native MCP registration; n8n should show 24 tools
+docker exec -u 10000:10000 hermes /opt/hermes/.venv/bin/hermes mcp list
+docker exec -u 10000:10000 hermes /opt/hermes/.venv/bin/hermes mcp test n8n
 ```
 
 ### Hermes / Moran / Honcho
@@ -425,8 +490,10 @@ systemctl stop fail2ban
 - Key-only SSH, UFW active, Fail2Ban active
 - Caddy handles HTTPS with Cloudflare trusted proxy
 - Internal-only DBs and services
-- Hermes Agent running with Telegram + dashboard (dashboard.zenaflow.com)
-- Open WebUI chat interface at argo.zenaflow.com, backed by Hermes OpenAI-compatible API
+- Hermes Agent default profile runs as Argo with Telegram + dashboard (dashboard.zenaflow.com)
+- Open WebUI chat interface at argo.zenaflow.com, backed by Argo's Hermes OpenAI-compatible API
+- Secondary Hermes profiles use dedicated API ports 8643-8648 to avoid conflicts with Argo on 8642; `robot` uses 8648 as a sterile future Dify/RAGFlow provider
+- Argo has n8n MCP integration through internal `n8n-mcp` container and can query/manage n8n workflows
 - Moran Hermes profile uses self-hosted Honcho memory: workspace `hermes-moran`, peer `kris`, AI peer `moran`
 - argo.zenaflow.com protected by Cloudflare Zero Trust Access
 - Tailscale mesh VPN for secure private access
