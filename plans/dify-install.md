@@ -317,3 +317,30 @@ Root causes identified:
 3. Consider whether pgadmin and redisinsight need to run 24/7 (saves ~350 MB RAM).
 4. Consider upgrading Hetzner plan for more RAM if zram proves insufficient under full load.
 
+
+### Robot model provider — plugin_daemon network fix (2026-06-05)
+
+Dify model-credential validation runs through the `plugin_daemon` container, not `api`.
+Symptom: validation failed with `Failed to resolve 'hermes'`.
+
+Root cause: `plugin_daemon` was only attached to `ssrf_proxy_network` + `default`, so it
+could not reach the `hermes` service on `core_core_net` (only `api` was on that network).
+
+Fix (made permanent): added `core_core_net` to the `plugin_daemon` service `networks:` list
+in /opt/core/dify/docker-compose.yaml, then `docker compose up -d plugin_daemon`.
+Backup saved at /opt/core/dify/docker-compose.yaml.bak.
+
+Verified after recreation:
+- plugin_daemon networks: core_core_net, dify_default, dify_ssrf_proxy_network
+- DNS: `getent hosts hermes` -> 172.18.0.5 hermes (persists across recreation)
+- Auth: GET http://hermes:8648/v1/models with robot API_SERVER_KEY -> lists model "robot"
+- E2E: POST /v1/chat/completions (model=robot) -> assistant replied "DIFY_TEST_OK"
+
+Robot provider settings used in Dify (OpenAI-API-compatible):
+- Base URL: http://hermes:8648/v1
+- API key: API_SERVER_KEY from /opt/core/hermes_data/profiles/robot/.env (64-char hex)
+- Model name: robot ; context 128000 ; max tokens 16384 ; Chat mode
+- Vision/structured-output/document/stream-function-calling: off ; stream auth: on
+
+Remaining: final credential-validation click-through in the Dify console (behind
+Cloudflare Zero Trust email login — must be done interactively in a browser).
