@@ -146,23 +146,40 @@ Honcho isolation rule:
 Config: `/opt/zenaflow/caddy/Caddyfile` (source of truth)
 
 ```
-workflow.zenaflow.com   → 127.0.0.1:5678   (n8n editor)
-webhook.zenaflow.com    → 127.0.0.1:5678   (n8n webhooks)
-argo.zenaflow.com       → 127.0.0.1:3001   (Open WebUI — Cloudflare Zero Trust protected)
-dashboard.zenaflow.com  → 127.0.0.1:9119   (Hermes dashboard)
+n8n.zenaflow.com              → 127.0.0.1:5678   (n8n editor; Cloudflare Zero Trust protected)
+webhook.n8n.zenaflow.com      → 127.0.0.1:5678   (temporary n8n webhook hostname; DNS-only/unproxied)
+n8n-in.zenaflow.com           → 127.0.0.1:5678   (temporary n8n webhook hostname; Cloudflare proxied)
+argo.zenaflow.com             → 127.0.0.1:3001   (Open WebUI — Cloudflare Zero Trust protected)
+dashboard.zenaflow.com        → 127.0.0.1:9119   (Hermes dashboard)
+dify.zenaflow.com             → 127.0.0.1:8088   (Dify — Cloudflare Zero Trust protected)
+postgres.zenaflow.com         → 127.0.0.1:8889   (pgAdmin — Cloudflare Zero Trust protected)
+redis.zenaflow.com            → 127.0.0.1:5540   (RedisInsight — Cloudflare Zero Trust protected)
 ```
 
-All domains:
-- SSL via Cloudflare (proxied, orange cloud)
+Retired n8n hostnames:
+- `workflow.zenaflow.com` removed from Caddy/DNS after migrating the editor to `n8n.zenaflow.com`.
+- `webhook.zenaflow.com` removed from Caddy/DNS after introducing the temporary webhook hostnames above.
+
+n8n webhook hostname policy:
+- The canonical `WEBHOOK_URL` in Compose is currently `https://webhook.n8n.zenaflow.com/`.
+- `webhook.n8n.zenaflow.com` and `n8n-in.zenaflow.com` are both kept temporarily for inbound webhooks while deciding which name to retain long-term.
+- Both webhook hostnames are path-filtered in Caddy. Only `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*` pass through to n8n; all other paths return 404 so the editor, login, REST API, and static UI paths are not exposed on webhook ingress domains.
+
+All Caddy domains:
 - Cloudflare trusted proxy IPs configured in global block
 - JSON access logs with 10MiB rotation, 7 files, 336h retention
+- TLS handled by Caddy/Let's Encrypt at the origin; Cloudflare-proxied hostnames terminate public TLS at Cloudflare and connect to Caddy at the origin.
 
 Log files:
 ```
-/var/log/caddy/workflow_access.log
-/var/log/caddy/webhook_access.log
+/var/log/caddy/n8n_access.log
+/var/log/caddy/webhook_n8n_access.log
+/var/log/caddy/n8n_in_access.log
 /var/log/caddy/argo_access.log
 /var/log/caddy/dashboard_access.log
+/var/log/caddy/dify_access.log
+/var/log/caddy/postgres_access.log
+/var/log/caddy/redis_access.log
 ```
 
 ---
@@ -202,27 +219,36 @@ Active jails:
 
 Logpaths:
 - /var/log/auth.log
-- /var/log/caddy/workflow_access.log
-- /var/log/caddy/webhook_access.log
+- /var/log/caddy/n8n_access.log
+- /var/log/caddy/webhook_n8n_access.log
+- /var/log/caddy/n8n_in_access.log
 
 ### 5.4 Cloudflare Access (Zero Trust)
-`argo.zenaflow.com` is protected by Cloudflare Access in addition to Caddy.
+Cloudflare Access protects human-facing/admin UIs before unauthenticated requests reach the VPS.
 
 - Team: `zenaflow.cloudflareaccess.com`
-- Application: `Open WebUI` (argo.zenaflow.com)
-- Policy: Allow — email allowlist (zenotempo@gmail.com)
-- Session duration: 24 hours
-- Auth method: one-time email code (OTP)
+- Protected applications include:
+  - `n8n.zenaflow.com` (n8n editor)
+  - `argo.zenaflow.com` (Open WebUI)
+  - `dify.zenaflow.com` (Dify)
+  - `postgres.zenaflow.com` (pgAdmin)
+  - `redis.zenaflow.com` (RedisInsight)
+- Policy pattern: email allowlist with one-time email code (OTP), usually 24-hour sessions.
 
-Any unauthenticated request to `argo.zenaflow.com` is intercepted by Cloudflare
-and redirected to the login page before reaching the VPS.
+Webhook ingress hostnames are intentionally not protected by Cloudflare Access because external automation callers must be able to POST to them. They are instead constrained by Caddy path filters plus workflow-level authentication/secrets.
+
+Any unauthenticated browser request to a protected hostname such as `n8n.zenaflow.com` or `argo.zenaflow.com` should be intercepted by Cloudflare and redirected to the Access login page before reaching the VPS.
 
 ---
 
 ## 6. SERVICES
 
 ### n8n
-- URL: workflow.zenaflow.com (editor), webhook.zenaflow.com (webhooks)
+- Editor URL: `n8n.zenaflow.com` (Cloudflare Zero Trust protected)
+- Canonical generated webhook URL: `webhook.n8n.zenaflow.com` (`WEBHOOK_URL=https://webhook.n8n.zenaflow.com/`)
+- Temporary alternate webhook URL: `n8n-in.zenaflow.com` (Cloudflare proxied)
+- Retired URLs: `workflow.zenaflow.com` and `webhook.zenaflow.com`
+- Webhook exposure: both temporary webhook hostnames are Caddy path-filtered to `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*`; all other paths return 404.
 - Data: /opt/core/n8n_data
 - DB: PostgreSQL `n8n` database
 - Public API: enabled; API key stored in `/opt/core/.env` as `N8N_API_KEY`
@@ -432,7 +458,7 @@ sudo docker exec -u hermes -d hermes /opt/hermes/.venv/bin/hermes -p moran gatew
 ```bash
 caddy validate --config /opt/zenaflow/caddy/Caddyfile
 sudo caddy reload --config /opt/zenaflow/caddy/Caddyfile
-tail -f /var/log/caddy/workflow_access.log
+tail -f /var/log/caddy/n8n_access.log
 ```
 
 ### Firewall
