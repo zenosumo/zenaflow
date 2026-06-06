@@ -344,3 +344,56 @@ Robot provider settings used in Dify (OpenAI-API-compatible):
 
 Remaining: final credential-validation click-through in the Dify console (behind
 Cloudflare Zero Trust email login — must be done interactively in a browser).
+
+### Robot model VERIFIED working end-to-end via UI (2026-06-06)
+
+Confirmed live: created a Chatflow app in Dify Studio, set the LLM node model to
+`robot` (OpenAI-API-compatible), sent "Reply with exactly: ROBOT_OK" in the preview
+chat — assistant replied "ROBOT_OK". Full chain proven: Dify UI -> api -> plugin_daemon
+-> core_core_net -> hermes robot profile -> response.
+
+DB confirms provider saved + valid:
+- provider_models: langgenius/openai_api_compatible, model "robot", type llm, is_valid=t
+- provider_model_credentials row present (created 2026-06-04)
+
+#### Two follow-on bugs found and fixed while testing
+
+1) Redis name collision (was causing "dancing dots" / request hang)
+   Symptom: dify-api log spammed `redis.exceptions.AuthenticationError: AUTH <password>
+   called without any password configured for the default user`. Chat requests hung
+   forever and never reached the LLM.
+   Root cause: after adding Dify's api/worker/worker_beat/api_websocket to core_core_net
+   (needed to reach hermes), the generic name `redis` became ambiguous — it resolved to
+   the CORE shared redis (172.18.0.7, NO password) instead of Dify's own dify-redis-1
+   (172.23.0.3, password-protected). Dify sent its password to the passwordless core
+   redis -> AUTH error.
+   Also found: CELERY_BROKER_URL used stale password `difyai123456` which fails auth
+   against dify-redis-1 (real pw = REDIS_PASSWORD value).
+   Fix (in /opt/core/dify/.env, backup .env.bak_20260606T212325Z):
+     - REDIS_HOST=redis            -> REDIS_HOST=dify-redis-1
+     - CELERY_BROKER_URL: difyai123456@redis -> <REDIS_PASSWORD>@dify-redis-1
+   Then: docker compose up -d api api_websocket worker worker_beat
+   Note: db_postgres was NOT affected — Dify references it by the unambiguous name
+   `db_postgres`, so only `redis` needed disambiguating. If more core services are ever
+   joined to core_core_net, watch for the same generic-name collision (redis, postgres).
+
+2) nginx 502 / "This page couldn't load" after recreating api
+   Symptom: console showed "This page couldn't load"; nginx logged
+   `connect() failed (111: Connection refused) ... upstream http://172.23.0.10:5001`.
+   Root cause: most Dify nginx routes use static `proxy_pass http://api:5001;` — nginx
+   resolves the name ONCE at startup and caches the IP. Recreating the api container
+   gave it a new IP (172.23.0.11), so nginx kept hitting the dead old IP.
+   Fix: `docker exec dify-nginx-1 nginx -s reload` (re-resolves, zero downtime). Console
+   went 502 -> 200 immediately.
+
+#### Operational rule — recreating Dify containers
+
+- A full reboot is SAFE: all containers restart together, nginx resolves fresh IPs.
+- `docker restart dify-api-1` is SAFE: restart keeps the same IP (no recreation).
+- HAZARD: recreating api/web/plugin_daemon (docker compose up -d <svc>, image update,
+  rm+recreate) while nginx keeps running -> nginx caches the stale IP -> 502s.
+  REMEDY: after recreating any of those, run `docker exec dify-nginx-1 nginx -s reload`
+  (or include nginx in the up: `docker compose up -d api nginx`).
+- Only the websocket route uses `resolver 127.0.0.11 valid=30s` and self-heals in 30s;
+  the console/api static routes do not. Do NOT hand-edit the nginx template (breaks on
+  Dify upgrades) — just reload nginx after recreations.
