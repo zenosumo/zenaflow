@@ -161,8 +161,8 @@ Retired n8n hostnames:
 - `webhook.zenaflow.com` removed from Caddy/DNS after introducing the temporary webhook hostnames above.
 
 n8n webhook hostname policy:
-- The canonical `WEBHOOK_URL` in Compose is currently `https://webhook.n8n.zenaflow.com/`.
-- `webhook.n8n.zenaflow.com` and `n8n-in.zenaflow.com` are both kept temporarily for inbound webhooks while deciding which name to retain long-term.
+- The canonical `WEBHOOK_URL` in Compose is currently `https://n8n-in.zenaflow.com/`.
+- `n8n-in.zenaflow.com` and `webhook.n8n.zenaflow.com` are both kept temporarily for inbound webhooks while deciding which name to retain long-term.
 - Both webhook hostnames are path-filtered in Caddy. Only `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*` pass through to n8n; all other paths return 404 so the editor, login, REST API, and static UI paths are not exposed on webhook ingress domains.
 
 All Caddy domains:
@@ -245,8 +245,8 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 
 ### n8n
 - Editor URL: `n8n.zenaflow.com` (Cloudflare Zero Trust protected)
-- Canonical generated webhook URL: `webhook.n8n.zenaflow.com` (`WEBHOOK_URL=https://webhook.n8n.zenaflow.com/`)
-- Temporary alternate webhook URL: `n8n-in.zenaflow.com` (Cloudflare proxied)
+- Canonical generated webhook URL: `n8n-in.zenaflow.com` (`WEBHOOK_URL=https://n8n-in.zenaflow.com/`)
+- Temporary alternate webhook URL: `webhook.n8n.zenaflow.com` (DNS-only/unproxied)
 - Retired URLs: `workflow.zenaflow.com` and `webhook.zenaflow.com`
 - Webhook exposure: both temporary webhook hostnames are Caddy path-filtered to `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*`; all other paths return 404.
 - Data: /opt/core/n8n_data
