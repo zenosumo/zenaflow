@@ -18,26 +18,6 @@ n8n.zenaflow.com {
   reverse_proxy 127.0.0.1:5678
 }
 
-webhook.n8n.zenaflow.com {
-  log {
-    output file /var/log/caddy/webhook_n8n_access.log {
-      roll_size 10MiB
-      roll_keep 7
-      roll_keep_for 336h
-    }
-    format json {
-      time_format iso8601
-    }
-  }
-
-  @new_n8n_webhook_paths path /webhook/* /webhook-test/* /form/* /form-waiting/*
-  handle @new_n8n_webhook_paths {
-    reverse_proxy 127.0.0.1:5678
-  }
-
-  respond "not found" 404
-}
-
 n8n-in.zenaflow.com {
   log {
     output file /var/log/caddy/n8n_in_access.log {

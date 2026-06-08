@@ -147,8 +147,7 @@ Config: `/opt/zenaflow/caddy/Caddyfile` (source of truth)
 
 ```
 n8n.zenaflow.com              → 127.0.0.1:5678   (n8n editor; Cloudflare Zero Trust protected)
-webhook.n8n.zenaflow.com      → 127.0.0.1:5678   (temporary n8n webhook hostname; DNS-only/unproxied)
-n8n-in.zenaflow.com           → 127.0.0.1:5678   (temporary n8n webhook hostname; Cloudflare proxied)
+n8n-in.zenaflow.com           → 127.0.0.1:5678   (official n8n webhook hostname; Cloudflare proxied)
 argo.zenaflow.com             → 127.0.0.1:3001   (Open WebUI — Cloudflare Zero Trust protected)
 dashboard.zenaflow.com        → 127.0.0.1:9119   (Hermes dashboard)
 dify.zenaflow.com             → 127.0.0.1:8088   (Dify — Cloudflare Zero Trust protected)
@@ -158,12 +157,12 @@ redis.zenaflow.com            → 127.0.0.1:5540   (RedisInsight — Cloudflare 
 
 Retired n8n hostnames:
 - `workflow.zenaflow.com` removed from Caddy/DNS after migrating the editor to `n8n.zenaflow.com`.
-- `webhook.zenaflow.com` removed from Caddy/DNS after introducing the temporary webhook hostnames above.
+- `webhook.zenaflow.com` removed from Caddy/DNS after migrating webhooks away from the original flat webhook hostname.
 
 n8n webhook hostname policy:
 - The canonical `WEBHOOK_URL` in Compose is currently `https://n8n-in.zenaflow.com/`.
-- `n8n-in.zenaflow.com` and `webhook.n8n.zenaflow.com` are both kept temporarily for inbound webhooks while deciding which name to retain long-term.
-- Both webhook hostnames are path-filtered in Caddy. Only `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*` pass through to n8n; all other paths return 404 so the editor, login, REST API, and static UI paths are not exposed on webhook ingress domains.
+- `n8n-in.zenaflow.com` is the only configured public n8n webhook ingress hostname.
+- The webhook hostname is path-filtered in Caddy. Only `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*` pass through to n8n; all other paths return 404 so the editor, login, REST API, and static UI paths are not exposed on the webhook ingress domain.
 
 All Caddy domains:
 - Cloudflare trusted proxy IPs configured in global block
@@ -173,7 +172,6 @@ All Caddy domains:
 Log files:
 ```
 /var/log/caddy/n8n_access.log
-/var/log/caddy/webhook_n8n_access.log
 /var/log/caddy/n8n_in_access.log
 /var/log/caddy/argo_access.log
 /var/log/caddy/dashboard_access.log
@@ -220,7 +218,6 @@ Active jails:
 Logpaths:
 - /var/log/auth.log
 - /var/log/caddy/n8n_access.log
-- /var/log/caddy/webhook_n8n_access.log
 - /var/log/caddy/n8n_in_access.log
 
 ### 5.4 Cloudflare Access (Zero Trust)
@@ -235,7 +232,7 @@ Cloudflare Access protects human-facing/admin UIs before unauthenticated request
   - `redis.zenaflow.com` (RedisInsight)
 - Policy pattern: email allowlist with one-time email code (OTP), usually 24-hour sessions.
 
-Webhook ingress hostnames are intentionally not protected by Cloudflare Access because external automation callers must be able to POST to them. They are instead constrained by Caddy path filters plus workflow-level authentication/secrets.
+The webhook ingress hostname is intentionally not protected by Cloudflare Access because external automation callers must be able to POST to it. It is instead constrained by Caddy path filters plus workflow-level authentication/secrets.
 
 Any unauthenticated browser request to a protected hostname such as `n8n.zenaflow.com` or `argo.zenaflow.com` should be intercepted by Cloudflare and redirected to the Access login page before reaching the VPS.
 
@@ -246,9 +243,8 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 ### n8n
 - Editor URL: `n8n.zenaflow.com` (Cloudflare Zero Trust protected)
 - Canonical generated webhook URL: `n8n-in.zenaflow.com` (`WEBHOOK_URL=https://n8n-in.zenaflow.com/`)
-- Temporary alternate webhook URL: `webhook.n8n.zenaflow.com` (DNS-only/unproxied)
-- Retired URLs: `workflow.zenaflow.com` and `webhook.zenaflow.com`
-- Webhook exposure: both temporary webhook hostnames are Caddy path-filtered to `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*`; all other paths return 404.
+- Retired URLs: `workflow.zenaflow.com`, `webhook.zenaflow.com`, and `webhook.n8n.zenaflow.com`
+- Webhook exposure: `n8n-in.zenaflow.com` is Caddy path-filtered to `/webhook/*`, `/webhook-test/*`, `/form/*`, and `/form-waiting/*`; all other paths return 404.
 - Data: /opt/core/n8n_data
 - DB: PostgreSQL `n8n` database
 - Public API: enabled; API key stored in `/opt/core/.env` as `N8N_API_KEY`
