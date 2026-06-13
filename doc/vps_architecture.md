@@ -83,6 +83,11 @@ Username: `zenaflow`. Requires Tailscale running on both Mac and VPS.
    dify/                         ← Dify separate Compose project runtime directory
       docker-compose.yaml        ← Dify-specific Compose file based on official 1.14.2 bundle
       .env                       ← sparse Dify-only config/secrets; runtime-only, do not commit
+   cliproxyapi/                  ← internal CLIProxyAPI Compose project for future Dify/provider use
+      docker-compose.yml         ← CLIProxyAPI service on core_core_net
+      config.yaml                ← runtime config/API keys/management secret; mode 0600, do not commit
+      auths/                     ← persisted provider OAuth auth files
+      logs/                      ← CLIProxyAPI logs when file logging is enabled
 
 /opt/memento                     ← second-brain Obsidian vault mounted into Hermes as `/memento`
 ```
@@ -281,6 +286,25 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 - Setup API after install: `/console/api/setup` returned `not_started`, so the first-user setup remains pending in the UI
 - Robot provider setup: configure manually in Dify UI after first boot using OpenAI-compatible endpoint `http://hermes:8648/v1`, model `robot`, API key from `/opt/core/hermes_data/profiles/robot/.env` (`API_SERVER_KEY`)
 - RAGFlow is not installed as part of the Dify stage.
+
+### CLIProxyAPI
+
+- Purpose: internal LLM proxy/API bridge for future Dify and other VPS service-to-service provider use
+- Current state: infrastructure installed and verified; Codex/OpenAI OAuth provider setup remains manual follow-up
+- Runtime directory: `/opt/core/cliproxyapi/`
+- Compose file: `/opt/core/cliproxyapi/docker-compose.yml`
+- Container: `cliproxyapi`
+- Image: `eceasy/cli-proxy-api:v7.1.74`
+- Network: `core_core_net`
+- Internal service URL from containers on `core_core_net`: `http://cliproxyapi:8317/v1`
+- Host-local URL for checks/admin workflow: `http://127.0.0.1:8317/v1`
+- Host-published port: only `127.0.0.1:8317 -> 8317`
+- No Caddy route, Cloudflare Access app, public DNS, or firewall opening
+- Runtime config/API keys/management secret: `/opt/core/cliproxyapi/config.yaml` (mode `0600`, do not paste or commit secrets)
+- Provider OAuth auth files: `/opt/core/cliproxyapi/auths/`
+- Logs: `/opt/core/cliproxyapi/logs/` when file logging is enabled
+- Verification after first start: unauthenticated `/v1/models` returned `401`; authenticated `/v1/models` returned `200` with an empty model list before provider OAuth; Docker-network DNS to `cliproxyapi` worked from `core_core_net`
+- Future Dify provider setup should use OpenAI-compatible base URL `http://cliproxyapi:8317/v1` after Codex/OpenAI OAuth and a direct chat completion are verified.
 
 ### Open WebUI
 - URL: argo.zenaflow.com (Cloudflare Zero Trust protected)

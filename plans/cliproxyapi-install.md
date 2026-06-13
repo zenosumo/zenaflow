@@ -1,6 +1,6 @@
 # CLIProxyAPI Install Plan
 
-Status: planned only. No installation work has started.
+Status: infrastructure installed and verified. CLIProxyAPI v7.1.74 is running under `/opt/core/cliproxyapi`; Codex/OpenAI OAuth and Dify provider setup remain manual follow-up work.
 
 ## Goal
 
@@ -74,7 +74,8 @@ Observed during planning:
 
 - Upstream project: `router-for-me/CLIProxyAPI`
 - Upstream GitHub repo: `https://github.com/router-for-me/CLIProxyAPI`
-- Latest stable release observed during planning: `v7.1.74`
+- Latest stable release selected at install time: `v7.1.74`
+- Installed image: `eceasy/cli-proxy-api:v7.1.74`
 - Official Compose example image observed during planning: `eceasy/cli-proxy-api:latest`
 - Default API port: `8317`
 
@@ -460,6 +461,29 @@ Future Dify verification must include:
 - model listing or provider validation in Dify;
 - one simple generation through Dify;
 - confirmation that existing Hermes robot provider remains unaffected.
+
+## Installation verification
+
+Verified after infrastructure start:
+
+- Runtime directory exists at `/opt/core/cliproxyapi/`.
+- Compose file exists at `/opt/core/cliproxyapi/docker-compose.yml`.
+- Runtime config exists at `/opt/core/cliproxyapi/config.yaml` with mode `0600`; secrets are not committed.
+- Container `cliproxyapi` is running from image `eceasy/cli-proxy-api:v7.1.74`.
+- Container restart policy is `unless-stopped`.
+- Container is attached to `core_core_net`.
+- Host-published port is localhost-only: `127.0.0.1:8317 -> 8317`.
+- Unauthenticated `/v1/models` returns `401` with `Missing API key`.
+- Authenticated `/v1/models` returns `200` and an empty model list before provider OAuth is configured.
+- Docker-network check from `core_core_net` reaches `http://cliproxyapi:8317/v1/models` with the internal API key.
+- Resource snapshot after start showed about `16 MiB` memory use for `cliproxyapi`.
+
+Remaining manual follow-up:
+
+1. Run the upstream-supported Codex/OpenAI OAuth login workflow.
+2. Confirm `/v1/models` lists expected Codex/OpenAI-backed models.
+3. Run one minimal chat completion directly against CLIProxyAPI.
+4. Configure Dify later as a separate task, using `http://cliproxyapi:8317/v1` and the internal Dify client key from `/opt/core/cliproxyapi/config.yaml`.
 
 ## Documentation updates after successful install
 
