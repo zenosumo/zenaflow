@@ -156,6 +156,7 @@ n8n-in.zenaflow.com           → 127.0.0.1:5678   (official n8n webhook hostnam
 argo.zenaflow.com             → 127.0.0.1:3001   (Open WebUI — Cloudflare Zero Trust protected)
 dashboard.zenaflow.com        → 127.0.0.1:9119   (Hermes dashboard)
 dify.zenaflow.com             → 127.0.0.1:8088   (Dify — Cloudflare Zero Trust protected)
+llmproxy.zenaflow.com         → 127.0.0.1:8317   (CLIProxyAPI management/API — Cloudflare Zero Trust protected)
 postgres.zenaflow.com         → 127.0.0.1:8889   (pgAdmin — Cloudflare Zero Trust protected)
 redis.zenaflow.com            → 127.0.0.1:5540   (RedisInsight — Cloudflare Zero Trust protected)
 ```
@@ -181,6 +182,7 @@ Log files:
 /var/log/caddy/argo_access.log
 /var/log/caddy/dashboard_access.log
 /var/log/caddy/dify_access.log
+/var/log/caddy/llmproxy_access.log
 /var/log/caddy/postgres_access.log
 /var/log/caddy/redis_access.log
 ```
@@ -233,6 +235,7 @@ Cloudflare Access protects human-facing/admin UIs before unauthenticated request
   - `n8n.zenaflow.com` (n8n editor)
   - `argo.zenaflow.com` (Open WebUI)
   - `dify.zenaflow.com` (Dify)
+  - `llmproxy.zenaflow.com` (CLIProxyAPI management/API)
   - `postgres.zenaflow.com` (pgAdmin)
   - `redis.zenaflow.com` (RedisInsight)
 - Policy pattern: email allowlist with one-time email code (OTP), usually 24-hour sessions.
@@ -297,10 +300,12 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 - Image: `eceasy/cli-proxy-api:v7.1.74`
 - Network: `core_core_net`
 - Internal service URL from containers on `core_core_net`: `http://cliproxyapi:8317/v1`
+- Public management/API hostname: `llmproxy.zenaflow.com` through Caddy + Cloudflare Zero Trust
+- Caddy route: `llmproxy.zenaflow.com -> 127.0.0.1:8317`
 - Host-local URL for checks/admin workflow: `http://127.0.0.1:8317/v1`
 - Host-published port: only `127.0.0.1:8317 -> 8317`
-- No Caddy route, Cloudflare Access app, public DNS, or firewall opening
 - Runtime config/API keys/management secret: `/opt/core/cliproxyapi/config.yaml` (mode `0600`, do not paste or commit secrets)
+- Remote management is enabled in CLIProxyAPI config so the Web UI works through Cloudflare/Caddy; Cloudflare Zero Trust and the CLIProxyAPI management secret are both required.
 - Provider OAuth auth files: `/opt/core/cliproxyapi/auths/`
 - Logs: `/opt/core/cliproxyapi/logs/` when file logging is enabled
 - Verification after first start: unauthenticated `/v1/models` returned `401`; authenticated `/v1/models` returned `200` with an empty model list before provider OAuth; Docker-network DNS to `cliproxyapi` worked from `core_core_net`

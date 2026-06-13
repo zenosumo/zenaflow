@@ -133,9 +133,9 @@ Model: chosen after Codex/OpenAI OAuth and model listing are verified
 ### Management UI/API
 
 - Keep management local/internal only for the first phase.
-- Do not expose `/management.html` through Caddy in the first phase.
+- `/management.html` is now exposed through Caddy at `https://llmproxy.zenaflow.com/management.html` after the first internal install phase.
 - Configure a strong management secret if the Management API/UI is enabled.
-- If possible, disable remote management or restrict it to localhost/internal access.
+- Remote management is enabled because the Web UI is reached through Caddy/Cloudflare; keep Cloudflare Zero Trust and the CLIProxyAPI management secret enforced.
 - If browser-based management is needed, use an SSH tunnel or VPS-local workflow rather than a public hostname.
 
 ### Networking
@@ -525,9 +525,9 @@ If the initial install fails before OAuth setup:
 ## Out of scope
 
 - No Dify provider changes during initial CLIProxyAPI install.
-- No Caddy route.
-- No Cloudflare Access app.
-- No public DNS.
+- Caddy route added after initial install: `llmproxy.zenaflow.com -> 127.0.0.1:8317`.
+- Cloudflare Access / Zero Trust protects `llmproxy.zenaflow.com`.
+- Public DNS exists for `llmproxy.zenaflow.com`, but origin remains localhost-bound.
 - No firewall changes.
 - No multi-provider setup.
 - No multi-account rotation.
