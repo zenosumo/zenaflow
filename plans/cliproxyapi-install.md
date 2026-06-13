@@ -354,7 +354,7 @@ services:
     ports:
       - "127.0.0.1:8317:8317"
     volumes:
-      - ./config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./config.yaml:/CLIProxyAPI/config.yaml
       - ./auths:/root/.cli-proxy-api
       - ./logs:/CLIProxyAPI/logs
     networks:
@@ -468,7 +468,7 @@ Verified after infrastructure start:
 
 - Runtime directory exists at `/opt/core/cliproxyapi/`.
 - Compose file exists at `/opt/core/cliproxyapi/docker-compose.yml`.
-- Runtime config exists at `/opt/core/cliproxyapi/config.yaml` with mode `0600`; secrets are not committed.
+- Runtime config exists at `/opt/core/cliproxyapi/config.yaml` with mode `0600`; secrets are not committed. The file is mounted read-write because the bundled Web UI persists provider/API-key configuration back to this file.
 - Container `cliproxyapi` is running from image `eceasy/cli-proxy-api:v7.1.74`.
 - Container restart policy is `unless-stopped`.
 - Container is attached to `core_core_net`.
