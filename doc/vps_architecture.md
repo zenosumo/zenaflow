@@ -119,13 +119,14 @@ Public ports:
 ### Docker Networks
 ```
 core_core_net    (bridge)  Main application network, subnet 172.18.0.0/16
-hermes_honcho    (bridge)  Private Hermes ↔ Honcho API network; no host-published ports
+hermes_honcho    (bridge)  Private Hermes ↔ Honcho API network plus Honcho ↔ CLIProxyAPI LLM-provider path; no host-published ports
 honcho_internal  (bridge)  Honcho API/worker ↔ Honcho Postgres/Redis only
 ```
 
 Honcho isolation rule:
 - `honcho-api` is reachable from `hermes` only via `hermes_honcho` at `http://honcho-api:8000`.
 - `honcho-postgres` and `honcho-redis` are only on `honcho_internal`.
+- `honcho-api`, `honcho-deriver`, and `cliproxyapi` share `hermes_honcho` so Honcho can call CLIProxyAPI at `http://cliproxyapi:8317/v1` without joining the broad `core_core_net`.
 - Honcho exposes no host port; `127.0.0.1:8000` should refuse connections from the VPS host.
 
 ### Container IP Map
@@ -362,9 +363,9 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 - Compose project: `honcho`
 - Compose file: `/opt/core/honcho/docker-compose.yml`
 - Services: `honcho-api`, `honcho-deriver`, `honcho-postgres`, `honcho-redis`
-- LLM backend: OpenAI-compatible opencode-zen endpoint (`claude-sonnet-4-6`) via `/opt/core/honcho/.env`
+- LLM backend: CLIProxyAPI OpenAI-compatible endpoint `http://cliproxyapi:8317/v1`, model `gpt-big`, API key from `/opt/core/cliproxyapi/config.yaml` `api-keys[0]`, stored for Honcho as `LLM_OPENAI_API_KEY` in `/opt/core/honcho/.env`
 - Message embeddings: disabled (`EMBED_MESSAGES=false`) until a dedicated embeddings provider is configured
-- API exposure: no published host port; accessible only from `hermes` over Docker network `hermes_honcho`
+- API exposure: no published host port; Honcho API is accessible only from `hermes` over Docker network `hermes_honcho`; Honcho LLM calls reach CLIProxyAPI over the same narrow network
 - Database: dedicated Honcho Postgres with pgvector, volume `honcho_pgdata`
 - Cache: dedicated Honcho Redis, volume `honcho_redis-data`
 
