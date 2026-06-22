@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5678:5678"
+    env_file:
+      - /opt/core/hermes_dashboard.env
     environment:
       - N8N_HOST=n8n.zenaflow.com
       - N8N_EDITOR_BASE_URL=https://n8n.zenaflow.com/
@@ -150,6 +152,8 @@ services:
       - core_net
 
   hermes:
+    env_file:
+      - /opt/core/hermes_dashboard.env
     build:
       context: ./hermes-agent-honcho
     image: zenaflow/hermes-agent-honcho:latest
@@ -173,7 +177,6 @@ services:
       - XDG_CONFIG_HOME=/opt/data/.config
       - HERMES_DASHBOARD=1
       - HERMES_DASHBOARD_HOST=0.0.0.0
-      - HERMES_DASHBOARD_INSECURE=true
       - HERMES_DASHBOARD_PORT=9119
       - HERMES_ALLOW_ROOT_GATEWAY=1
       - API_SERVER_ENABLED=true

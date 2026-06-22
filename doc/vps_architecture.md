@@ -373,6 +373,7 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 - Services: `honcho-api`, `honcho-deriver`, `honcho-postgres`, `honcho-redis`
 - Hermes image: local `zenaflow/hermes-agent-honcho:latest`, built from `nousresearch/hermes-agent:latest` with `honcho-ai==2.1.2` installed so the Honcho memory plugin survives container recreation
 - Hermes image Dockerfiles: live `/opt/core/hermes-agent-honcho/Dockerfile`; repo `docker/hermes-agent-honcho/Dockerfile`
+- Hermes dashboard: enabled on container port `9119` and host-bound to `127.0.0.1:9119`; dashboard auth env is loaded from `/opt/core/hermes_dashboard.env`, with recovery credentials in `/opt/core/hermes_dashboard_credentials.txt` (both `root:appdev`, mode `0640`). Do not commit dashboard secrets.
 - Honcho workspaces: `hermes-moran` for Moran, `hermes-argo` for Argo/main
 - LLM backend: CLIProxyAPI OpenAI-compatible endpoint `http://cliproxyapi:8317/v1`, model `gpt-big`, API key from `/opt/core/cliproxyapi/config.yaml` `api-keys[0]`, stored for Honcho as `LLM_OPENAI_API_KEY` in `/opt/core/honcho/.env`
 - Embedding backend: direct Gemini `gemini-embedding-001` with `EMBEDDING_VECTOR_DIMENSIONS=1536`; CLIProxyAPI currently exposes no embedding models, so embeddings are intentionally separate from the `gpt-big` LLM route
