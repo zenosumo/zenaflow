@@ -358,13 +358,25 @@ Any unauthenticated browser request to a protected hostname such as `n8n.zenaflo
 - Honcho identity: workspace `hermes-moran`, user peer `kris`, AI peer `moran`
 - Honcho API URL from Hermes: `http://honcho-api:8000`
 
-### Honcho Memory Stack (Moran)
-- Purpose: self-hosted Honcho memory backend for Hermes profile `moran`
+
+#### Hermes profile: Argo/main
+- Profile path: `/opt/core/hermes_data`
+- Memory provider: Honcho (`memory.provider: honcho`)
+- Honcho config: `/opt/core/hermes_data/honcho.json`
+- Honcho identity: workspace `hermes-argo`, user peer `kris`, AI peer `argo`
+- Honcho API URL from Hermes: `http://honcho-api:8000`
+
+### Honcho Memory Stack
+- Purpose: self-hosted Honcho memory backend for Hermes profiles `moran` and Argo/main
 - Compose project: `honcho`
 - Compose file: `/opt/core/honcho/docker-compose.yml`
 - Services: `honcho-api`, `honcho-deriver`, `honcho-postgres`, `honcho-redis`
+- Hermes image: local `zenaflow/hermes-agent-honcho:latest`, built from `nousresearch/hermes-agent:latest` with `honcho-ai==2.1.2` installed so the Honcho memory plugin survives container recreation
+- Hermes image Dockerfiles: live `/opt/core/hermes-agent-honcho/Dockerfile`; repo `docker/hermes-agent-honcho/Dockerfile`
+- Honcho workspaces: `hermes-moran` for Moran, `hermes-argo` for Argo/main
 - LLM backend: CLIProxyAPI OpenAI-compatible endpoint `http://cliproxyapi:8317/v1`, model `gpt-big`, API key from `/opt/core/cliproxyapi/config.yaml` `api-keys[0]`, stored for Honcho as `LLM_OPENAI_API_KEY` in `/opt/core/honcho/.env`
-- Message embeddings: disabled (`EMBED_MESSAGES=false`) until a dedicated embeddings provider is configured
+- Embedding backend: direct Gemini `gemini-embedding-001` with `EMBEDDING_VECTOR_DIMENSIONS=1536`; CLIProxyAPI currently exposes no embedding models, so embeddings are intentionally separate from the `gpt-big` LLM route
+- Message embeddings: disabled for raw message ingestion (`EMBED_MESSAGES=false`), but Honcho conclusion/search embedding calls use the Gemini embedding backend
 - API exposure: no published host port; Honcho API is accessible only from `hermes` over Docker network `hermes_honcho`; Honcho LLM calls reach CLIProxyAPI over the same narrow network
 - Database: dedicated Honcho Postgres with pgvector, volume `honcho_pgdata`
 - Cache: dedicated Honcho Redis, volume `honcho_redis-data`

@@ -150,7 +150,9 @@ services:
       - core_net
 
   hermes:
-    image: nousresearch/hermes-agent:latest
+    build:
+      context: ./hermes-agent-honcho
+    image: zenaflow/hermes-agent-honcho:latest
     container_name: hermes
     restart: unless-stopped
     command: gateway run
