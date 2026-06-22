@@ -185,9 +185,12 @@ services:
           cpus: "2.0"
     networks:
       - core_net
+      - hermes_honcho
 
 volumes:
   n8n-mcp-data:
 
 networks:
   core_net:
+  hermes_honcho:
+    external: true
